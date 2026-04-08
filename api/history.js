@@ -33,6 +33,8 @@ router.all('/', (req, res) => {
                 year: req.body.year || '',
                 likes: req.body.likes || '',
                 dislikes: req.body.dislikes || '',
+                thumbnail: req.body.thumbnail || '',
+                source: req.body.source || 'local',
                 date: new Date().toISOString().replace('T', ' ').substring(0, 19)
             });
             saveHistory(history.slice(0, 200));

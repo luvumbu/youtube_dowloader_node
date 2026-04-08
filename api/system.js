@@ -3,6 +3,7 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { clearAll, stats } = require('./cache');
 const router = express.Router();
 
 function getYtdlpExec() {
@@ -112,6 +113,15 @@ router.all('/', (req, res) => {
             });
             break;
         }
+
+        case 'cache_stats':
+            res.json({ success: true, cache: stats() });
+            break;
+
+        case 'cache_clear':
+            clearAll();
+            res.json({ success: true, message: 'Cache vide.' });
+            break;
 
         default:
             res.json({ success: false, error: 'Action inconnue.' });

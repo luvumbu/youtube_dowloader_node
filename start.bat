@@ -275,6 +275,8 @@ echo   Verification terminee.
 
 :SkipCheck
 
+echo.
+
 :: ============================================================
 :: CREATION DES DOSSIERS ET FICHIERS
 :: ============================================================
@@ -285,6 +287,7 @@ if not exist "data\profiles.json" (echo [])> "data\profiles.json"
 if not exist "data\history.json" (echo [])> "data\history.json"
 if not exist "data\queue.json" (echo [])> "data\queue.json"
 if not exist "data\notifications.json" (echo [])> "data\notifications.json"
+if not exist "data\flow.json" (echo {"tracks":[],"playlists":[]})> "data\flow.json"
 
 :: ============================================================
 :: AJOUTER LES OUTILS LOCAUX AU PATH (si presents)

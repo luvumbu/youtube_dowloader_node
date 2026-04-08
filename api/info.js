@@ -1,7 +1,10 @@
 const express = require('express');
 const { execFile } = require('child_process');
 const config = require('../config');
+const { getCache } = require('./cache');
 const router = express.Router();
+
+const infoCache = getCache('info', 10 * 60 * 1000); // 10 min
 
 /**
  * Decompose config.YTDLP_CMD en { cmd, baseArgs }
@@ -25,6 +28,10 @@ router.post('/', (req, res) => {
     if (!config.YTDLP_AVAILABLE) {
         return res.json({ success: false, error: 'yt-dlp non disponible. Lance start.bat pour installer.' });
     }
+
+    // Verifier le cache
+    const cached = infoCache.get(url);
+    if (cached) return res.json(cached);
 
     const { cmd, baseArgs } = getYtdlpExec();
     const args = [...baseArgs, '--dump-json', '--no-playlist', '--no-warnings', '--remote-components', 'ejs:github', url];
@@ -50,7 +57,7 @@ router.post('/', (req, res) => {
             const uploadDate = data.upload_date || '';
             const year = uploadDate ? uploadDate.substring(0, 4) : '';
 
-            res.json({
+            const result = {
                 success: true,
                 title: data.title,
                 thumbnail: data.thumbnail || '',
@@ -61,7 +68,9 @@ router.post('/', (req, res) => {
                 year,
                 likes: data.like_count || 0,
                 dislikes: data.dislike_count || 0
-            });
+            };
+            infoCache.set(url, result);
+            res.json(result);
         } catch (e) {
             res.json({ success: false, error: 'Impossible de recuperer la video.' });
         }

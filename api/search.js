@@ -1,7 +1,10 @@
 const express = require('express');
 const { execFile } = require('child_process');
 const config = require('../config');
+const { getCache } = require('./cache');
 const router = express.Router();
+
+const searchCache = getCache('search', 5 * 60 * 1000); // 5 min
 
 function getYtdlpExec() {
     const ytdlpCmd = config.YTDLP_CMD;
@@ -14,13 +17,17 @@ function getYtdlpExec() {
 
 router.get('/', (req, res) => {
     const query = (req.query.q || '').trim();
-    const max = Math.min(parseInt(req.query.max) || 10, 20);
+    const max = Math.min(parseInt(req.query.max) || 10, 50);
 
     if (!query) return res.json({ success: false, error: 'Requete vide.' });
 
     if (!config.YTDLP_AVAILABLE) {
         return res.json({ success: false, error: 'yt-dlp non disponible. Lance start.bat pour installer.' });
     }
+
+    const cacheKey = query + ':' + max;
+    const cached = searchCache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const { cmd, baseArgs } = getYtdlpExec();
     const args = [...baseArgs, '--flat-playlist', '--dump-json', '--no-warnings', '--remote-components', 'ejs:github', '--default-search', `ytsearch${max}`, query];
@@ -46,7 +53,9 @@ router.get('/', (req, res) => {
             } catch (e) {}
         }
 
-        res.json({ success: true, results });
+        const result = { success: true, results };
+        searchCache.set(cacheKey, result);
+        res.json(result);
     });
 });
 

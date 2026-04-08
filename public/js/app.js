@@ -80,10 +80,12 @@ function switchTab(tab) {
     document.querySelector('.tab-content#tab-' + tab).classList.add('active');
     // Trouver le bon onglet a activer dans la barre
     document.querySelectorAll('.tab').forEach(t => {
-        const tabMap = { 'Telecharger': 'download', 'Recherche': 'search', 'Bibliotheque': 'library', 'Profil': 'profile' };
+        const tabMap = { 'Telecharger': 'download', 'Recherche': 'search', 'Bibliotheque': 'library', 'Mon Flow': 'flow', 'Profil': 'profile' };
         if (tabMap[t.textContent] === tab) t.classList.add('active');
     });
     localStorage.setItem('yt_tab', tab);
+    if (tab === 'flow') { loadFlow(); }
+    if (tab === 'profile') { loadCacheStats(); }
     if (tab === 'library') { loadLibrary(); loadHistory(); loadSystemInfo(); }
 }
 
@@ -373,6 +375,10 @@ async function loadLibrary() {
     buildFilterChips();
 }
 
+function sortLibrary() {
+    renderLibrary();
+}
+
 let activeFilters = new Set(['all']);
 
 function buildFilterChips() {
@@ -456,6 +462,22 @@ function renderLibrary() {
             + '</div>';
     });
     document.getElementById('foldersBar').innerHTML = foldersHtml;
+
+    // Sort items
+    const libSort = document.getElementById('libSortBy') ? document.getElementById('libSortBy').value : 'date-desc';
+    items.sort((a, b) => {
+        switch (libSort) {
+            case 'date-desc': return (b.date || '').localeCompare(a.date || '');
+            case 'date-asc': return (a.date || '').localeCompare(b.date || '');
+            case 'title-asc': return (a.title || '').localeCompare(b.title || '', 'fr');
+            case 'title-desc': return (b.title || '').localeCompare(a.title || '', 'fr');
+            case 'type-audio': return (a.type === 'audio' ? 0 : 1) - (b.type === 'audio' ? 0 : 1);
+            case 'type-video': return (a.type === 'video' ? 0 : 1) - (b.type === 'video' ? 0 : 1);
+            case 'size-desc': return (b.size || 0) - (a.size || 0);
+            case 'size-asc': return (a.size || 0) - (b.size || 0);
+            default: return 0;
+        }
+    });
 
     // Filter items
     const filtered = currentFolder === '' ? items : items.filter(i => i.folder === currentFolder);
@@ -721,6 +743,22 @@ const videoEl = document.getElementById('videoEl');
 // --- Persistance du lecteur ---
 function savePlayerState() {
     try {
+        // Sauvegarder aussi l'etat Mon Flow
+        if (flowCurrentIdx >= 0 && flowTracks[flowCurrentIdx]) {
+            const t = flowTracks[flowCurrentIdx];
+            localStorage.setItem('flow_state', JSON.stringify({
+                trackId: t.id,
+                trackIdx: flowCurrentIdx,
+                type: flowCurrentType || 'audio',
+                currentTime: audioEl.currentTime || 0,
+                volume: audioEl.volume,
+                playing: !audioEl.paused,
+                shuffle: flowShuffle
+            }));
+            localStorage.removeItem('player_state');
+            return;
+        }
+        localStorage.removeItem('flow_state');
         localStorage.setItem('player_state', JSON.stringify({
             playlist, playIndex, playMode,
             currentTime: audioEl.currentTime || 0,
@@ -731,6 +769,16 @@ function savePlayerState() {
 }
 
 function restorePlayerState() {
+    // Essayer de restaurer Mon Flow d'abord
+    try {
+        const flowState = JSON.parse(localStorage.getItem('flow_state') || 'null');
+        if (flowState && flowState.trackId) {
+            restoreFlowState(flowState);
+            return;
+        }
+    } catch (e) {}
+
+    // Sinon restaurer la lecture locale
     try {
         const state = JSON.parse(localStorage.getItem('player_state') || 'null');
         if (!state || !state.playlist || !state.playlist.length) return;
@@ -757,7 +805,6 @@ function restorePlayerState() {
             if (state.currentTime > 0) audioEl.currentTime = state.currentTime;
             if (state.playing) {
                 audioEl.play().catch(() => {
-                    // Autoplay bloque par le navigateur — afficher pause
                     document.getElementById('btnPlayPause').innerHTML = '&#9654;';
                 });
             }
@@ -765,6 +812,77 @@ function restorePlayerState() {
 
         document.getElementById('btnPlayPause').innerHTML = state.playing ? '&#9646;&#9646;' : '&#9654;';
     } catch (e) {}
+}
+
+async function restoreFlowState(state) {
+    // Charger les tracks de Mon Flow
+    try {
+        const resp = await fetch('api/flow?action=list');
+        const data = await resp.json();
+        if (!data.success) return;
+        flowTracks = data.tracks || [];
+        flowPlaylists = data.playlists || [];
+    } catch (e) { return; }
+
+    // Retrouver le track par son ID
+    const idx = flowTracks.findIndex(t => t.id === state.trackId);
+    if (idx === -1) return;
+
+    const t = flowTracks[idx];
+    flowCurrentIdx = idx;
+    flowCurrentType = state.type || 'audio';
+    flowShuffle = state.shuffle || false;
+
+    // Afficher le player bar
+    const bar = document.getElementById('playerBar');
+    bar.classList.add('active');
+    document.body.classList.add('player-open');
+
+    let thumb = t.thumbnail || '';
+    if (!thumb && t.url) { const m = t.url.match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+
+    document.getElementById('playerThumb').src = thumb;
+    document.getElementById('playerTitle').textContent = t.title || '';
+    document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Reprise...';
+    document.getElementById('btnPlayPause').innerHTML = '&#9654;';
+    document.getElementById('volumeSlider').value = Math.round((state.volume ?? 0.5) * 100);
+
+    // Recuperer le flux stream
+    try {
+        const resp = await fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + flowCurrentType);
+        const data = await resp.json();
+        if (!data.success) {
+            document.getElementById('playerArtist').textContent = 'Erreur : flux indisponible';
+            return;
+        }
+
+        audioEl.src = data.streamUrl;
+        audioEl.volume = state.volume ?? 0.5;
+
+        audioEl.addEventListener('loadedmetadata', function onLoaded() {
+            audioEl.removeEventListener('loadedmetadata', onLoaded);
+            if (state.currentTime > 0) audioEl.currentTime = state.currentTime;
+            if (state.playing) {
+                audioEl.play().then(() => {
+                    document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
+                }).catch(() => {
+                    document.getElementById('btnPlayPause').innerHTML = '&#9654;';
+                });
+            }
+        });
+
+        document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Streaming';
+        if (state.playing) document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
+
+        // Remettre le onended
+        audioEl.onended = function() { flowNext(flowCurrentType); };
+
+        // Pre-charger le suivant
+        flowPreloadNext(idx, flowCurrentType);
+
+    } catch (e) {
+        document.getElementById('playerArtist').textContent = 'Erreur de connexion';
+    }
 }
 
 function getItemById(id) {
@@ -885,48 +1003,48 @@ function playVideo(item) {
 function closeVideoPlayer() {
     videoEl.pause();
     videoEl.src = '';
-    var iframe = document.getElementById('youtubeIframe');
-    if (iframe) iframe.remove();
+    const iframe = document.getElementById('videoIframe');
+    if (iframe) { iframe.src = ''; iframe.style.display = 'none'; }
+    videoEl.style.display = '';
     document.getElementById('videoOverlay').classList.remove('active');
 }
 
-function previewYouTube(videoId, title) {
-    if (!videoId) return;
+function playYoutubeVideo(url, title) {
+    const vMatch = url.match(/[?&]v=([^&]+)/) || url.match(/youtu\.be\/([^?&]+)/) || url.match(/\/shorts\/([^?&]+)/);
+    if (!vMatch) return;
+
     audioEl.pause();
     document.getElementById('playerBar').classList.remove('active');
     document.body.classList.remove('player-open');
 
     videoEl.style.display = 'none';
-    var existing = document.getElementById('youtubeIframe');
-    if (existing) existing.remove();
-
-    var iframe = document.createElement('iframe');
-    iframe.id = 'youtubeIframe';
-    iframe.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1';
-    iframe.allow = 'autoplay; encrypted-media';
-    iframe.allowFullscreen = true;
-    iframe.style.cssText = 'width:100%;max-width:900px;aspect-ratio:16/9;border:none;border-radius:12px;';
-
-    var overlay = document.getElementById('videoOverlay');
-    overlay.insertBefore(iframe, document.getElementById('videoPlayerTitle'));
+    const iframe = document.getElementById('videoIframe');
+    iframe.src = 'https://www.youtube.com/embed/' + vMatch[1] + '?autoplay=1&rel=0';
+    iframe.style.display = 'block';
     document.getElementById('videoPlayerTitle').textContent = title || '';
-    overlay.classList.add('active');
+    document.getElementById('videoOverlay').classList.add('active');
+}
 
-    videoEl.style.display = '';
+function previewYouTube(videoId, title) {
+    if (!videoId) return;
+    playYoutubeVideo('https://www.youtube.com/watch?v=' + videoId, title);
 }
 
 function playerToggle() {
-    if (audioEl.paused) {
-        audioEl.play();
+    const a = document.getElementById('audioEl');
+    if (a.paused) {
+        a.play();
         document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
     } else {
-        audioEl.pause();
+        a.pause();
         document.getElementById('btnPlayPause').innerHTML = '&#9654;';
     }
     savePlayerState();
 }
 
 function playerNext() {
+    // Si Mon Flow est actif, utiliser flowNext
+    if (flowCurrentIdx >= 0) { flowNext(); return; }
     if (playlist.length === 0) return;
     if (playMode === 'loopOne') {
         audioEl.currentTime = 0; audioEl.play(); return;
@@ -947,6 +1065,8 @@ function playerNext() {
 }
 
 function playerPrev() {
+    // Si Mon Flow est actif, utiliser flowPrev
+    if (flowCurrentIdx >= 0) { flowPrev(); return; }
     if (playlist.length === 0) return;
     // If more than 3s in, restart current track
     if (audioEl.currentTime > 3) {
@@ -1004,11 +1124,16 @@ function seekPlayer(e) {
 function playerClose() {
     audioEl.pause();
     audioEl.src = '';
+    audioEl.onended = null;
     document.getElementById('playerBar').classList.remove('active');
     document.body.classList.remove('player-open');
     document.getElementById('playerQueue').style.display = 'none';
     playlist = [];
+    flowCurrentIdx = -1;
+    flowPreloaded = null;
+    document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
     localStorage.removeItem('player_state');
+    localStorage.removeItem('flow_state');
 }
 
 function togglePlayerQueue() {
@@ -1282,18 +1407,32 @@ document.getElementById('loginName').addEventListener('keydown', function(e) {
 let lastSearchResults = [];
 
 // ========== SEARCH YOUTUBE ==========
-async function searchYouTube() {
+let searchPage = 1;
+let searchQuery = '';
+
+async function searchYouTube(loadMore) {
     const query = document.getElementById('searchInput').value.trim();
     if (!query) return;
 
     const container = document.getElementById('searchResults');
-    // Skeleton loading
-    container.innerHTML = '<div class="items-grid">'
-        + Array(4).fill('<div class="item-card skeleton"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line w70"></div><div class="skeleton-line w40"></div></div></div>').join('')
-        + '</div>';
+
+    if (!loadMore || query !== searchQuery) {
+        searchPage = 1;
+        searchQuery = query;
+        lastSearchResults = [];
+        container.innerHTML = '<div class="items-grid">'
+            + Array(4).fill('<div class="item-card skeleton"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line w70"></div><div class="skeleton-line w40"></div></div></div>').join('')
+            + '</div>';
+    } else {
+        searchPage++;
+        const moreBtn = document.getElementById('searchMoreBtn');
+        if (moreBtn) moreBtn.textContent = 'Chargement...';
+    }
+
+    const max = 20 * searchPage;
 
     try {
-        const resp = await fetch('api/search?q=' + encodeURIComponent(query) + '&max=10');
+        const resp = await fetch('api/search?q=' + encodeURIComponent(query) + '&max=' + max);
         const data = await resp.json();
 
         if (!data.success || data.results.length === 0) {
@@ -1308,6 +1447,7 @@ async function searchYouTube() {
         var bar = '<div class="search-results-bar">'
             + '<span class="sr-count">' + data.results.length + ' resultat(s) pour "' + query.replace(/</g, '&lt;') + '"</span>'
             + '<button class="sr-btn-all" onclick="sqAddAll()">&#11015; Tout telecharger (' + data.results.length + ')</button>'
+            + '<button class="sr-btn-all" style="background:#9C27B0;" onclick="searchAddAllToFlow()">+ Tout dans Mon Flow</button>'
             + '</div>';
         container.innerHTML = bar + '<div class="items-grid" id="searchGrid">' + data.results.map((r, i) => {
             var videoId = r.url.match(/[?&]v=([\w-]+)/);
@@ -1326,8 +1466,13 @@ async function searchYouTube() {
             + '<div class="item-actions">'
             + '<button class="item-dl" onclick="sqAdd(' + i + ', true)">DL</button>'
             + '<button class="item-move" onclick="sqAdd(' + i + ')">+ File</button>'
+            + '<button class="item-move" style="background:#9C27B0;color:#fff;" onclick="searchAddToFlow(' + i + ', this)">+ Flow</button>'
+            + '<button class="item-move" style="background:#2196F3;color:#fff;" onclick="playYoutubeVideo(\'' + r.url.replace(/'/g, "\\'") + '\', \'' + safeTitle + '\')">&#9654; Video</button>'
             + '</div></div></div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>'
+        + '<div style="text-align:center;padding:14px;">'
+        + '<button id="searchMoreBtn" onclick="searchYouTube(true)" style="background:var(--primary);color:#fff;border:none;padding:10px 28px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Charger plus de resultats (' + data.results.length + ' affiches)</button>'
+        + '</div>';
         // Marquer les videos deja telechargees
         sqMarkDownloaded();
     } catch (err) {
@@ -1376,22 +1521,82 @@ async function sqCheckUrl(url, format) {
 }
 
 async function sqMarkDownloaded() {
-    // Marquer les cartes de recherche deja telechargees
     if (!lastSearchResults.length) return;
+
+    // Charger la biblio et Mon Flow en parallele
+    let libItems = [];
+    let flowItems = [];
+    try {
+        const [libResp, flowResp] = await Promise.all([
+            fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' }),
+            fetch('api/flow?action=list')
+        ]);
+        const libData = await libResp.json();
+        const flowData = await flowResp.json();
+        if (libData.success) libItems = libData.items || [];
+        if (flowData.success) flowItems = flowData.tracks || [];
+    } catch (e) {}
+
+    const libVids = new Set(libItems.map(i => { const m = (i.url || '').match(/[?&]v=([^&]+)/); return m ? m[1] : ''; }).filter(Boolean));
+    const flowVids = new Set(flowItems.map(i => { const m = (i.url || '').match(/[?&]v=([^&]+)/); return m ? m[1] : ''; }).filter(Boolean));
+
     for (let i = 0; i < lastSearchResults.length; i++) {
-        const exists = await sqCheckUrl(lastSearchResults[i].url);
-        if (exists) {
-            const card = document.querySelector('#searchGrid .item-card:nth-child(' + (i + 1) + ')');
-            if (card && !card.classList.contains('sq-downloaded')) {
-                card.classList.add('sq-downloaded');
-                const badge = card.querySelector('.badge');
-                if (badge) { badge.className = 'badge badge-downloaded'; badge.textContent = '✓ DL'; }
-            }
+        const vMatch = (lastSearchResults[i].url || '').match(/[?&]v=([^&]+)/);
+        const vid = vMatch ? vMatch[1] : '';
+        const card = document.querySelector('#searchGrid .item-card:nth-child(' + (i + 1) + ')');
+        if (!card) continue;
+
+        if (vid && libVids.has(vid) && !card.classList.contains('sq-downloaded')) {
+            card.classList.add('sq-downloaded');
+            const badge = card.querySelector('.badge');
+            if (badge) { badge.className = 'badge badge-downloaded'; badge.textContent = '✓ DL'; }
+        }
+        if (vid && flowVids.has(vid)) {
+            card.classList.add('sq-in-flow');
+            const flowBtn = card.querySelector('[onclick*="searchAddToFlow"]');
+            if (flowBtn) { flowBtn.textContent = '✓ Flow'; flowBtn.style.background = '#666'; flowBtn.disabled = true; }
         }
     }
 }
 
 // --- Ajouter un element ---
+async function searchAddToFlow(index, btn) {
+    const r = lastSearchResults[index];
+    if (!r) return;
+    btn.textContent = '...';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('api/flow', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add&url=' + encodeURIComponent(r.url)
+                + '&title=' + encodeURIComponent(r.title || '')
+                + '&channel=' + encodeURIComponent(r.channel || '')
+                + '&thumbnail=' + encodeURIComponent(r.thumbnail || '')
+                + '&duration=' + encodeURIComponent(r.duration || '')
+        });
+        const data = await resp.json();
+        btn.textContent = data.duplicate ? 'Deja' : 'OK!';
+        btn.style.background = data.duplicate ? '#666' : '#4CAF50';
+    } catch (e) { btn.textContent = '!'; }
+    setTimeout(() => { btn.textContent = '+ Flow'; btn.style.background = '#9C27B0'; btn.disabled = false; }, 2500);
+}
+
+async function searchAddAllToFlow() {
+    if (!lastSearchResults || lastSearchResults.length === 0) return;
+    const items = lastSearchResults.map(r => ({
+        url: r.url, title: r.title || '', channel: r.channel || '',
+        thumbnail: r.thumbnail || '', duration: r.duration || ''
+    }));
+    try {
+        const resp = await fetch('api/flow', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
+        });
+        const data = await resp.json();
+        alert(data.added + ' titre(s) ajoute(s) a Mon Flow');
+    } catch (e) { alert('Erreur'); }
+}
+
 function sqAdd(index, startNow) {
     const r = lastSearchResults[index];
     if (!r) return;
@@ -2527,6 +2732,7 @@ async function addHistory(title, status, format, type, url, info) {
             + '&year=' + encodeURIComponent(extra.year || '')
             + '&likes=' + encodeURIComponent(extra.likes || '0')
             + '&dislikes=' + encodeURIComponent(extra.dislikes || '0')
+            + '&thumbnail=' + encodeURIComponent(extra.thumbnail || '')
     }).catch(() => {});
 }
 
@@ -2537,19 +2743,35 @@ function formatLikes(n) {
     return '' + n;
 }
 
+let historyCache = [];
+
 async function loadHistory() {
     try {
         const resp = await fetch('api/history?action=list');
         const data = await resp.json();
         if (!data.success) return;
 
+        historyCache = data.history || [];
         const container = document.getElementById('historyList');
-        if (data.history.length === 0) {
+        const actionsBar = document.getElementById('historyActions');
+
+        if (historyCache.length === 0) {
             container.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">Aucun historique.</p>';
+            actionsBar.style.display = 'none';
             return;
         }
 
-        container.innerHTML = data.history.slice(0, 50).map(h => {
+        actionsBar.style.display = 'block';
+
+        // Charger la bibliotheque pour detecter les doublons
+        let libItems = [];
+        try {
+            const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
+            const libData = await libResp.json();
+            if (libData.success) libItems = libData.items || [];
+        } catch (e) {}
+
+        container.innerHTML = historyCache.slice(0, 100).map((h, i) => {
             const icon = h.status === 'success' ? '&#10003;' : '&#10007;';
             const cls = h.status === 'success' ? 'success' : 'error';
             const views = h.views ? h.views : '';
@@ -2557,30 +2779,1351 @@ async function loadHistory() {
             const likes = h.likes ? formatLikes(h.likes) : '';
             const dislikes = h.dislikes ? formatLikes(h.dislikes) : '';
             let meta = '';
-            if (views) meta += views;
+            if (h.channel) meta += h.channel;
+            if (views) meta += (meta ? ' · ' : '') + views;
             if (year) meta += (meta ? ' · ' : '') + year;
             if (likes) meta += (meta ? ' · ' : '') + '&#9650; ' + likes;
             if (dislikes && parseInt(h.dislikes) > 0) meta += ' · &#9660; ' + dislikes;
-            return '<div class="history-item">'
+            const hasUrl = h.url && h.url.length > 5;
+
+            // Detecter si deja dans la bibliotheque
+            let inLib = false;
+            if (hasUrl) {
+                const vMatch = h.url.match(/[?&]v=([^&]+)/);
+                const vid = vMatch ? vMatch[1] : '';
+                if (vid) inLib = libItems.some(item => item.url && item.url.includes(vid) && (item.format || '') === (h.format || ''));
+            }
+
+            // Thumbnail : depuis l'historique ou fallback YouTube
+            let thumb = h.thumbnail || '';
+            if (!thumb && hasUrl) {
+                const vMatch = h.url.match(/[?&]v=([^&]+)/);
+                if (vMatch) thumb = 'https://i.ytimg.com/vi/' + vMatch[1] + '/mqdefault.jpg';
+            }
+
+            const source = h.source || 'local';
+            const isLocal = source === 'local';
+            const sourceBadge = isLocal
+                ? '<span class="hi-badge-local">Local</span>'
+                : '<span class="hi-badge-import" title="Importe depuis: ' + source + '">' + source + '</span>';
+
+            return '<div class="history-item' + (hasUrl ? '' : ' no-url') + (inLib ? ' in-lib' : '') + '" data-idx="' + i + '" data-inlib="' + (inLib ? '1' : '0') + '"' + (hasUrl ? ' draggable="true" ondragstart="histDragStart(event, ' + i + ')"' : '') + '>'
+                + (hasUrl ? '<input type="checkbox" class="hist-check" data-idx="' + i + '" onchange="historyUpdateCount()">' : '<span style="width:20px;display:inline-block;"></span>')
+                + (thumb ? '<img class="hi-thumb" src="' + thumb + '" loading="lazy">' : '')
                 + '<span class="hi-icon ' + cls + '">' + icon + '</span>'
                 + '<div class="hi-body">'
-                + '<span class="hi-title">' + h.title + '</span>'
+                + '<span class="hi-title">' + h.title + (inLib ? ' <span class="hi-badge-lib">Dans la biblio</span>' : '') + '</span>'
                 + (meta ? '<span class="hi-stats">' + meta + '</span>' : '')
                 + '</div>'
+                + sourceBadge
+                + (hasUrl ? '<button class="hi-stream-btn hi-stream-audio" onclick="streamFromHistory(' + i + ',\'audio\')">&#9654; Ecouter</button>' : '')
+                + (hasUrl ? '<button class="hi-stream-btn hi-stream-video" onclick="playYoutubeVideo(\'' + (h.url || '').replace(/'/g, "\\'") + '\', \'' + (h.title || '').replace(/'/g, "\\'") + '\')">&#9654; Video</button>' : '')
+                + (hasUrl ? '<button class="hi-stream-btn hi-stream-flow" onclick="addToFlowFromHistory(' + i + ', this)">+ Flow</button>' : '')
                 + '<span class="hi-format">' + (h.format || '').toUpperCase() + '</span>'
+                + '<span class="hi-type">' + (h.type === 'video' ? 'Video' : 'Audio') + '</span>'
                 + '<span class="hi-date">' + (h.date || '').split(' ')[0] + '</span>'
                 + '</div>';
         }).join('');
+
+        // Generer les filtres par source
+        const sources = new Set(historyCache.map(h => h.source || 'local'));
+        const filtersDiv = document.getElementById('historyFilters');
+        if (sources.size > 1) {
+            filtersDiv.style.display = 'flex';
+            let filtersHtml = '<span class="hist-filter active" onclick="filterHistory(\'all\', this)">Tout (' + historyCache.length + ')</span>';
+            for (const s of sources) {
+                const count = historyCache.filter(h => (h.source || 'local') === s).length;
+                const label = s === 'local' ? 'Local' : s;
+                filtersHtml += '<span class="hist-filter" onclick="filterHistory(\'' + s.replace(/'/g, "\\'") + '\', this)">' + label + ' (' + count + ')</span>';
+            }
+            filtersDiv.innerHTML = filtersHtml;
+        } else {
+            filtersDiv.style.display = 'none';
+        }
+
+        historyUpdateCount();
     } catch (err) {}
 }
 
+let historyFilterSource = 'all';
+let historyFilterPresence = 'all';
+
+function filterHistory(source, el) {
+    historyFilterSource = source;
+    document.querySelectorAll('.hist-filter').forEach(f => f.classList.remove('active'));
+    if (el) el.classList.add('active');
+    applyHistoryFilters();
+}
+
+function sortHistory() {
+    const sort = document.getElementById('historySortBy').value;
+    historyCache.sort((a, b) => {
+        switch (sort) {
+            case 'date-desc': return (b.date || '').localeCompare(a.date || '');
+            case 'date-asc': return (a.date || '').localeCompare(b.date || '');
+            case 'title-asc': return (a.title || '').localeCompare(b.title || '', 'fr');
+            case 'title-desc': return (b.title || '').localeCompare(a.title || '', 'fr');
+            case 'type-audio': return (a.type === 'audio' ? 0 : 1) - (b.type === 'audio' ? 0 : 1);
+            case 'type-video': return (a.type === 'video' ? 0 : 1) - (b.type === 'video' ? 0 : 1);
+            default: return 0;
+        }
+    });
+    loadHistory();
+}
+
+function filterHistorySearch() {
+    applyHistoryFilters();
+}
+
+function filterHistoryPresence(val, el) {
+    historyFilterPresence = val;
+    el.parentElement.querySelectorAll('.hist-filter').forEach(f => f.classList.remove('active'));
+    el.classList.add('active');
+    applyHistoryFilters();
+}
+
+function applyHistoryFilters() {
+    const search = (document.getElementById('historySearch').value || '').toLowerCase().trim();
+    document.querySelectorAll('.history-item').forEach(item => {
+        const idx = parseInt(item.dataset.idx);
+        const h = historyCache[idx];
+        if (!h) return;
+        const itemSource = h.source || 'local';
+        const inLib = item.dataset.inlib === '1';
+        const matchSource = historyFilterSource === 'all' || itemSource === historyFilterSource;
+        const matchSearch = !search || (h.title || '').toLowerCase().includes(search) || (h.channel || '').toLowerCase().includes(search);
+        const matchPresence = historyFilterPresence === 'all' || (historyFilterPresence === 'present' && inLib) || (historyFilterPresence === 'absent' && !inLib);
+        item.style.display = (matchSource && matchSearch && matchPresence) ? '' : 'none';
+    });
+    historyUpdateCount();
+}
+
+function historyUpdateCount() {
+    const checks = document.querySelectorAll('.hist-check:checked');
+    document.getElementById('historySelCount').textContent = checks.length + ' selectionne(s)';
+}
+
+function historySelectAll() {
+    document.querySelectorAll('.hist-check').forEach(cb => cb.checked = true);
+    historyUpdateCount();
+    document.getElementById('btnHistSelectAll').style.display = 'none';
+    document.getElementById('btnHistDeselectAll').style.display = '';
+}
+
+function historyDeselectAll() {
+    document.querySelectorAll('.hist-check').forEach(cb => cb.checked = false);
+    historyUpdateCount();
+    document.getElementById('btnHistSelectAll').style.display = '';
+    document.getElementById('btnHistDeselectAll').style.display = 'none';
+}
+
+function historyGetSelected() {
+    const selected = [];
+    document.querySelectorAll('.hist-check:checked').forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        if (historyCache[idx]) {
+            const item = Object.assign({}, historyCache[idx]);
+            item._histIdx = idx;
+            selected.push(item);
+        }
+    });
+    return selected;
+}
+
+async function historyRedownload() {
+    const selected = historyGetSelected();
+    if (selected.length === 0) { alert('Selectionne au moins un element.'); return; }
+
+    // Lire le format choisi
+    const formatSel = document.getElementById('redownloadFormat').value;
+    let dlType, dlFormat;
+    if (formatSel === 'original') {
+        dlType = null; dlFormat = null; // garder le format d'origine de chaque element
+    } else {
+        const parts = formatSel.split(':');
+        dlType = parts[0];
+        dlFormat = parts[1];
+    }
+
+    // Verifier les doublons
+    let libItems = [];
+    try {
+        const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
+        const libData = await libResp.json();
+        if (libData.success) libItems = libData.items || [];
+    } catch (e) {}
+
+    // Marquer chaque element comme doublon ou non
+    for (const h of selected) {
+        h._skip = false;
+        if (!h.url) { h._skip = true; h._skipReason = 'Pas d\'URL'; continue; }
+        const vMatch = h.url.match(/[?&]v=([^&]+)/);
+        const vid = vMatch ? vMatch[1] : '';
+        const checkFormat = dlFormat || h.format || '';
+        const inLib = vid && libItems.some(item => item.url && item.url.includes(vid) && (item.format || '') === checkFormat);
+        if (inLib) { h._skip = true; h._skipReason = 'Deja dans la bibliotheque'; }
+    }
+
+    // Afficher la file de re-telechargement
+    const queueDiv = document.getElementById('redownloadQueue');
+    const listDiv = document.getElementById('redownloadList');
+    const countSpan = document.getElementById('redownloadCount');
+    queueDiv.style.display = 'block';
+
+    // Creer les elements visuels
+    // Thumbnail fallback YouTube
+    function getThumb(h) {
+        if (h.thumbnail) return h.thumbnail;
+        if (h.url) { const m = h.url.match(/[?&]v=([^&]+)/); if (m) return 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+        return '';
+    }
+
+    listDiv.innerHTML = selected.map((h, i) => {
+        const thumb = getThumb(h);
+        const useType = dlType || h.type || 'audio';
+        const useFormat = dlFormat || h.format || 'mp3';
+        const skipped = h._skip;
+        return '<div class="queue-item rdl-item' + (skipped ? ' rdl-skipped' : '') + '" id="rdl-' + i + '">'
+            + (thumb ? '<img src="' + thumb + '" class="rdl-thumb">' : '')
+            + '<div class="rdl-info">'
+            + '<div class="qi-title">' + (h.title || 'Sans titre') + '</div>'
+            + '<div class="rdl-meta">' + useFormat.toUpperCase() + ' ' + (useType === 'video' ? 'Video' : 'Audio') + (h.channel ? ' · ' + h.channel : '') + '</div>'
+            + (skipped ? '' : '<div class="rdl-bar-wrap"><div class="rdl-bar" id="rdl-bar-' + i + '"></div></div>')
+            + '</div>'
+            + '<div class="rdl-right">'
+            + '<div class="rdl-percent" id="rdl-percent-' + i + '">' + (skipped ? '' : '0%') + '</div>'
+            + '<div class="qi-status' + (skipped ? '' : '') + '" id="rdl-status-' + i + '" style="' + (skipped ? 'color:var(--text-muted)' : '') + '">' + (skipped ? h._skipReason : 'En attente') + '</div>'
+            + '</div>'
+            + '</div>';
+    }).join('');
+
+    let done = 0;
+    countSpan.textContent = '0/' + selected.length;
+
+    for (let i = 0; i < selected.length; i++) {
+        const h = selected[i];
+        const statusEl = document.getElementById('rdl-status-' + i);
+        const itemEl = document.getElementById('rdl-' + i);
+
+        if (h._skip) {
+            done++;
+            countSpan.textContent = done + '/' + selected.length;
+            continue;
+        }
+
+        // Marquer comme actif
+        const barEl = document.getElementById('rdl-bar-' + i);
+        const pctEl = document.getElementById('rdl-percent-' + i);
+        statusEl.textContent = 'Connexion...';
+        statusEl.className = 'qi-status active';
+        itemEl.style.borderColor = 'var(--blue)';
+        itemEl.style.background = 'rgba(33,150,243,0.05)';
+        if (barEl) { barEl.style.width = '5%'; barEl.style.background = 'var(--blue)'; }
+
+        try {
+            const type = dlType || h.type || 'audio';
+            const format = dlFormat || h.format || 'mp3';
+            const quality = type === 'audio' ? '0' : 'best';
+
+            const dlResp = await fetch('api/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'url=' + encodeURIComponent(h.url) + '&type=' + type + '&format=' + format + '&quality=' + quality + '&cover=1'
+            });
+            const dlData = await dlResp.json();
+
+            if (dlData.success) {
+                logTech('INFO', 'Re-telechargement lance', { title: h.title, jobId: dlData.jobId });
+
+                // Suivre la progression
+                await new Promise((resolve) => {
+                    const poll = setInterval(async () => {
+                        try {
+                            const pResp = await fetch('api/progress?id=' + dlData.jobId);
+                            const pData = await pResp.json();
+
+                            if (pData.status === 'done') {
+                                clearInterval(poll);
+                                statusEl.textContent = 'Termine !';
+                                statusEl.className = 'qi-status done';
+                                itemEl.style.borderColor = 'var(--success)';
+                                itemEl.style.background = 'rgba(76,175,80,0.05)';
+                                if (barEl) { barEl.style.width = '100%'; barEl.style.background = 'var(--success)'; }
+                                if (pctEl) pctEl.textContent = '100%';
+                                // Mettre a jour l'icone dans l'historique (croix -> check)
+                                const histItem = document.querySelector('.history-item[data-idx="' + selected[i]._histIdx + '"] .hi-icon');
+                                if (histItem) { histItem.innerHTML = '&#10003;'; histItem.className = 'hi-icon success'; }
+                                // Ajouter a la bibliotheque
+                                fetch('api/library', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                    body: 'action=add_item&file=' + encodeURIComponent(pData.file || '')
+                                        + '&title=' + encodeURIComponent(h.title || '')
+                                        + '&type=' + (h.type || 'audio') + '&format=' + (h.format || 'mp3')
+                                        + '&folder=' + '&thumbnail='
+                                        + '&channel=' + encodeURIComponent(h.channel || '')
+                                        + '&duration=&cover=' + encodeURIComponent(pData.cover || '')
+                                        + '&url=' + encodeURIComponent(h.url || '')
+                                }).catch(() => {});
+                                resolve();
+                            } else if (pData.status === 'error') {
+                                clearInterval(poll);
+                                statusEl.textContent = 'Erreur';
+                                statusEl.className = 'qi-status';
+                                statusEl.style.color = 'var(--error)';
+                                itemEl.style.borderColor = 'var(--error)';
+                                itemEl.style.background = 'rgba(244,67,54,0.05)';
+                                if (barEl) { barEl.style.width = '100%'; barEl.style.background = 'var(--error)'; }
+                                if (pctEl) pctEl.textContent = '!';
+                                resolve();
+                            } else {
+                                const pct = pData.percent || 0;
+                                statusEl.textContent = pData.message || 'En cours...';
+                                if (barEl) barEl.style.width = Math.max(5, pct) + '%';
+                                if (pctEl) pctEl.textContent = pct + '%';
+                            }
+                        } catch (e) {
+                            statusEl.textContent = 'Connexion...';
+                        }
+                    }, 1500);
+
+                    // Timeout de 5 minutes max par element
+                    setTimeout(() => { clearInterval(poll); resolve(); }, 300000);
+                });
+            } else {
+                statusEl.textContent = dlData.error || 'Erreur';
+                statusEl.className = 'qi-status';
+                statusEl.style.color = 'var(--error)';
+                itemEl.style.borderColor = 'var(--error)';
+            }
+        } catch (e) {
+            statusEl.textContent = 'Erreur reseau';
+            statusEl.className = 'qi-status';
+            statusEl.style.color = 'var(--error)';
+            logTech('ERROR', 'Echec re-telechargement', { title: h.title, error: e.message });
+        }
+
+        done++;
+        countSpan.textContent = done + '/' + selected.length;
+
+        // Delai entre chaque pour eviter le 429
+        if (i < selected.length - 1) await new Promise(r => setTimeout(r, 3000));
+    }
+
+    countSpan.textContent = done + '/' + selected.length + ' - Termine !';
+}
+
+function historyExport() {
+    const selected = historyGetSelected();
+    const toExport = selected.length > 0 ? selected : historyCache;
+    const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'youtube_downloads_' + new Date().toISOString().split('T')[0] + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+function historyImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const sourceName = file.name.replace('.json', '');
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const imported = JSON.parse(e.target.result);
+            if (!Array.isArray(imported)) { alert('Fichier invalide.'); return; }
+
+            // Dedoublonner : ne pas importer les URLs deja presentes
+            const existingUrls = new Set(historyCache.map(h => h.url).filter(Boolean));
+            let added = 0, skipped = 0;
+
+            for (const h of imported) {
+                if (h.url && existingUrls.has(h.url)) { skipped++; continue; }
+                await fetch('api/history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'action=add&title=' + encodeURIComponent(h.title || '')
+                        + '&status=' + encodeURIComponent(h.status || 'success')
+                        + '&format=' + encodeURIComponent(h.format || '')
+                        + '&type=' + encodeURIComponent(h.type || '')
+                        + '&url=' + encodeURIComponent(h.url || '')
+                        + '&channel=' + encodeURIComponent(h.channel || '')
+                        + '&views=' + encodeURIComponent(h.views || '')
+                        + '&year=' + encodeURIComponent(h.year || '')
+                        + '&likes=' + encodeURIComponent(h.likes || '0')
+                        + '&dislikes=' + encodeURIComponent(h.dislikes || '0')
+                        + '&thumbnail=' + encodeURIComponent(h.thumbnail || '')
+                        + '&source=' + encodeURIComponent(h.source === 'local' ? sourceName : (h.source || sourceName))
+                });
+                if (h.url) existingUrls.add(h.url);
+                added++;
+            }
+            let msg = added + ' element(s) importe(s) depuis "' + sourceName + '"';
+            if (skipped > 0) msg += '\n' + skipped + ' doublon(s) ignore(s)';
+            alert(msg);
+            loadHistory();
+        } catch (err) {
+            alert('Erreur de lecture du fichier.');
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+// ========== STREAMING ==========
+let currentStreamIdx = -1;
+let preloadedNext = null; // { idx, type, streamUrl }
+
+// Cache des fichiers locaux de la bibliotheque
+let historyLibCache = [];
+
+async function streamFromHistory(idx, type) {
+    const h = historyCache[idx];
+    if (!h || !h.url) return;
+
+    const playerDiv = document.getElementById('streamPlayer');
+    const audioEl = document.getElementById('streamAudio');
+    const videoEl = document.getElementById('streamVideo');
+    const titleEl = document.getElementById('streamTitle');
+    const metaEl = document.getElementById('streamMeta');
+    const thumbEl = document.getElementById('streamThumb');
+
+    // Arreter le flux en cours
+    audioEl.pause(); audioEl.src = '';
+    videoEl.pause(); videoEl.src = '';
+
+    playerDiv.style.display = 'block';
+    titleEl.textContent = h.title || 'Chargement...';
+    currentStreamIdx = idx;
+
+    // Thumbnail
+    let thumb = h.thumbnail || '';
+    if (!thumb && h.url) {
+        const m = h.url.match(/[?&]v=([^&]+)/);
+        if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg';
+    }
+    thumbEl.src = thumb;
+
+    // Marquer visuellement
+    document.querySelectorAll('.history-item').forEach(el => el.classList.remove('hi-playing'));
+    const histEl = document.querySelector('.history-item[data-idx="' + idx + '"]');
+    if (histEl) histEl.classList.add('hi-playing');
+
+    // Verifier si le fichier est present localement
+    if (historyLibCache.length === 0) {
+        try {
+            const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
+            const libData = await libResp.json();
+            if (libData.success) historyLibCache = libData.items || [];
+        } catch (e) {}
+    }
+
+    const vMatch = h.url.match(/[?&]v=([^&]+)/);
+    const vid = vMatch ? vMatch[1] : '';
+    const localItem = vid ? historyLibCache.find(item => item.url && item.url.includes(vid)) : null;
+
+    if (localItem && localItem.file) {
+        // Si on demande video mais le fichier local est audio, passer au streaming
+        if (type === 'video' && localItem.type !== 'video') {
+            // Ne pas utiliser le local, continuer vers le streaming YouTube
+        } else {
+            // Lecture locale
+            const localUrl = localItem.file.split('/').map(encodeURIComponent).join('/');
+
+            if (type === 'video' && localItem.type === 'video') {
+                audioEl.style.display = 'none';
+                videoEl.style.display = 'block';
+                videoEl.src = localUrl;
+                videoEl.play().catch(() => {});
+            } else {
+                videoEl.style.display = 'none';
+                audioEl.style.display = 'block';
+                audioEl.src = localUrl;
+                audioEl.play().catch(() => {});
+            }
+            metaEl.textContent = (h.channel || '') + (h.channel ? ' · ' : '') + 'Lecture locale';
+            logTech('INFO', 'Lecture locale', { title: h.title });
+
+            preloadNext(idx, type);
+            const mediaEl = (type === 'video' && localItem.type === 'video') ? videoEl : audioEl;
+            mediaEl.onended = function() { playNextStream(idx, type); };
+            return;
+        }
+    }
+
+    // Sinon streaming YouTube
+    metaEl.textContent = 'Recuperation du flux ' + (type === 'video' ? 'video' : 'audio') + '...';
+
+    try {
+        let streamUrl;
+        if (preloadedNext && preloadedNext.idx === idx && preloadedNext.type === type) {
+            streamUrl = preloadedNext.streamUrl;
+            preloadedNext = null;
+            logTech('INFO', 'Stream pre-charge utilise', { title: h.title });
+        } else {
+            const resp = await fetch('api/stream?url=' + encodeURIComponent(h.url) + '&type=' + type);
+            const data = await resp.json();
+            if (!data.success) {
+                metaEl.textContent = 'Erreur : ' + (data.error || 'Flux indisponible');
+                return;
+            }
+            streamUrl = data.streamUrl;
+        }
+
+        if (type === 'video') {
+            audioEl.style.display = 'none';
+            videoEl.style.display = 'block';
+            videoEl.src = streamUrl;
+            videoEl.play().catch(() => {});
+        } else {
+            videoEl.style.display = 'none';
+            audioEl.style.display = 'block';
+            audioEl.src = streamUrl;
+            audioEl.play().catch(() => {});
+        }
+        metaEl.textContent = (h.channel || '') + (h.channel ? ' · ' : '') + 'Streaming YouTube';
+        logTech('INFO', 'Stream YouTube', { title: h.title, type });
+
+        preloadNext(idx, type);
+        const mediaEl = type === 'video' ? videoEl : audioEl;
+        mediaEl.onended = function() { playNextStream(idx, type); };
+
+    } catch (e) {
+        metaEl.textContent = 'Erreur de connexion';
+        logTech('ERROR', 'Echec stream', { title: h.title, error: e.message });
+    }
+}
+
+function getNextStreamIdx(currentIdx) {
+    const items = document.querySelectorAll('.history-item:not([style*="display: none"])');
+    let foundCurrent = false;
+    for (const item of items) {
+        const idx = parseInt(item.dataset.idx);
+        if (idx === currentIdx) { foundCurrent = true; continue; }
+        if (foundCurrent && historyCache[idx] && historyCache[idx].url) {
+            return idx;
+        }
+    }
+    return -1;
+}
+
+function preloadNext(currentIdx, type) {
+    const nextIdx = getNextStreamIdx(currentIdx);
+    if (nextIdx === -1) { preloadedNext = null; return; }
+
+    const h = historyCache[nextIdx];
+    logTech('INFO', 'Pre-chargement du suivant', { title: h.title });
+
+    fetch('api/stream?url=' + encodeURIComponent(h.url) + '&type=' + type)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && currentStreamIdx === currentIdx) {
+                preloadedNext = { idx: nextIdx, type, streamUrl: data.streamUrl };
+                logTech('INFO', 'Pre-chargement OK', { title: h.title });
+            }
+        })
+        .catch(() => { preloadedNext = null; });
+}
+
+function playNextStream(currentIdx, type) {
+    const nextIdx = getNextStreamIdx(currentIdx);
+    if (nextIdx === -1) {
+        document.getElementById('streamMeta').textContent = 'Fin de la liste';
+        return;
+    }
+    streamFromHistory(nextIdx, type);
+}
+
+function stopStream() {
+    const audioEl = document.getElementById('streamAudio');
+    const videoEl = document.getElementById('streamVideo');
+    audioEl.pause(); audioEl.src = '';
+    videoEl.pause(); videoEl.src = '';
+    document.getElementById('streamPlayer').style.display = 'none';
+    document.querySelectorAll('.history-item').forEach(el => el.classList.remove('hi-playing'));
+    currentStreamIdx = -1;
+    preloadedNext = null;
+}
+
+async function addToFlowFromHistory(idx, btn) {
+    const h = historyCache[idx];
+    if (!h || !h.url) return;
+    btn.textContent = '...';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('api/flow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add&url=' + encodeURIComponent(h.url)
+                + '&title=' + encodeURIComponent(h.title || '')
+                + '&channel=' + encodeURIComponent(h.channel || '')
+                + '&thumbnail=' + encodeURIComponent(h.thumbnail || '')
+                + '&views=' + encodeURIComponent(h.views || '')
+                + '&year=' + encodeURIComponent(h.year || '')
+                + '&format=' + encodeURIComponent(h.format || '')
+                + '&type=' + encodeURIComponent(h.type || 'audio')
+        });
+        const data = await resp.json();
+        if (data.duplicate) {
+            btn.textContent = 'Deja dans Flow';
+            btn.style.background = 'var(--text-muted)';
+        } else {
+            btn.textContent = 'Ajoute !';
+            btn.style.background = 'var(--success)';
+        }
+    } catch (e) {
+        btn.textContent = 'Erreur';
+        btn.style.background = 'var(--error)';
+    }
+}
+
+// ========== MON FLOW ==========
+let flowTracks = [];
+let flowPlaylists = [];
+let flowCurrentIdx = -1;
+let flowCurrentType = 'audio';
+let flowShuffle = false;
+let flowCurrentPlaylist = '';
+let flowPreloaded = null;
+
+let flowLibItems = [];
+
+async function loadFlow() {
+    try {
+        const resp = await fetch('api/flow?action=list');
+        const data = await resp.json();
+        if (!data.success) return;
+        flowTracks = data.tracks || [];
+        flowPlaylists = data.playlists || [];
+
+        // Charger la biblio une seule fois pour detecter les fichiers deja telecharges
+        try {
+            const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
+            const libData = await libResp.json();
+            if (libData.success) flowLibItems = libData.items || [];
+        } catch (e) {}
+
+        renderFlow();
+    } catch (e) {}
+}
+
+function renderFlow() {
+    const list = document.getElementById('flowList');
+    const countEl = document.getElementById('flowTrackCount');
+    const search = (document.getElementById('flowSearch').value || '').toLowerCase().trim();
+
+    // Filtres playlists
+    const plDiv = document.getElementById('flowPlaylists');
+    const plNames = [...new Set(flowTracks.map(t => t.playlist).filter(Boolean))];
+    let plHtml = '<span class="flow-pl-chip' + (!flowCurrentPlaylist ? ' active' : '') + '" onclick="flowFilterPlaylist(\'\', this)" ondragover="event.preventDefault()" ondrop="flowDropOnPlaylist(event, \'\')">Tout (' + flowTracks.length + ')</span>';
+    const unassigned = flowTracks.filter(t => !t.playlist).length;
+    if (plNames.length > 0 && unassigned > 0) {
+        plHtml += '<span class="flow-pl-chip' + (flowCurrentPlaylist === '__none__' ? ' active' : '') + '" onclick="flowFilterPlaylist(\'__none__\', this)" ondragover="event.preventDefault(); this.classList.add(\'flow-pl-dragover\')" ondragleave="this.classList.remove(\'flow-pl-dragover\')" ondrop="this.classList.remove(\'flow-pl-dragover\'); flowDropOnPlaylist(event, \'\')">Sans playlist (' + unassigned + ')</span>';
+    }
+    // Inclure aussi les playlists vides
+    const allPlNames = [...new Set([...plNames, ...flowPlaylists.map(p => p.name)])];
+    for (const pl of allPlNames) {
+        const c = flowTracks.filter(t => t.playlist === pl).length;
+        const safePl = pl.replace(/'/g, "\\'");
+        plHtml += '<span class="flow-pl-chip' + (flowCurrentPlaylist === pl ? ' active' : '') + '" onclick="flowFilterPlaylist(\'' + safePl + '\', this)" ondragover="event.preventDefault(); this.classList.add(\'flow-pl-dragover\')" ondragleave="this.classList.remove(\'flow-pl-dragover\')" ondrop="this.classList.remove(\'flow-pl-dragover\'); flowDropOnPlaylist(event, \'' + safePl + '\')">'
+            + pl + ' (' + c + ')'
+            + '<span class="flow-pl-play" onclick="event.stopPropagation(); flowPlayAll(\'' + safePl + '\')" title="Tout lire">&#9654;</span>'
+            + '<span class="flow-pl-del" onclick="event.stopPropagation(); flowDeletePlaylist(\'' + safePl + '\')" title="Supprimer">&times;</span>'
+            + '</span>';
+    }
+    plDiv.innerHTML = plHtml;
+
+    // Filtrer
+    const filtered = flowTracks.filter((t, i) => {
+        const matchPl = !flowCurrentPlaylist || (flowCurrentPlaylist === '__none__' ? !t.playlist : t.playlist === flowCurrentPlaylist);
+        const matchSearch = !search || (t.title || '').toLowerCase().includes(search) || (t.channel || '').toLowerCase().includes(search);
+        return matchPl && matchSearch;
+    });
+
+    countEl.textContent = filtered.length + ' titre(s)';
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:30px;">Aucun titre. Ajoute des morceaux depuis l\'historique ou importe une liste.</p>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(t => {
+        const realIdx = flowTracks.indexOf(t);
+        let thumb = t.thumbnail || '';
+        if (!thumb && t.url) { const m = t.url.match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+        const playing = realIdx === flowCurrentIdx;
+        const plTag = t.playlist ? '<span class="fl-playlist-tag">' + t.playlist + '</span>' : '';
+        // Menu playlist
+        let plOptions = '<option value="">-- Deplacer vers --</option><option value="__none__">Aucune playlist</option>';
+        for (const pl of flowPlaylists) {
+            if (pl.name !== t.playlist) plOptions += '<option value="' + pl.name + '">' + pl.name + '</option>';
+        }
+
+            const vMatch = (t.url || '').match(/[?&]v=([^&]+)/);
+            const vid = vMatch ? vMatch[1] : '';
+            const dlFormatSel = document.getElementById('flowDlFormat') ? document.getElementById('flowDlFormat').value : 'audio:mp3';
+            const dlParts = dlFormatSel.split(':');
+            const dlType = dlParts[0];
+            const dlFormat = dlParts[1];
+            const inLib = vid && flowLibItems.some(item => item.url && item.url.includes(vid) && (item.format || '') === dlFormat);
+
+            return '<div class="flow-track' + (playing ? ' fl-playing' : '') + (inLib ? ' fl-downloaded' : '') + '" data-idx="' + realIdx + '" draggable="true" ondragstart="flowDragStart(event, ' + realIdx + ')">'
+            + (thumb ? '<img class="fl-thumb" src="' + thumb + '" loading="lazy" onclick="flowPlay(' + realIdx + ',\'audio\')">' : '')
+            + '<div class="fl-body">'
+            + '<span class="fl-title">' + (t.title || 'Sans titre') + ' ' + plTag + (inLib ? ' <span class="fl-dl-badge">DL</span>' : '') + '</span>'
+            + '<span class="fl-info">' + [t.channel, t.duration, t.year].filter(Boolean).join(' · ') + '</span>'
+            + ((t.playCount || 0) > 0 ? '<span class="fl-plays-badge">' + t.playCount + 'x</span>' : '')
+            + '</div>'
+            + (flowPlaylists.length > 0 ? '<select class="fl-move-select" onchange="flowMoveTrack(\'' + t.id + '\', this.value); this.selectedIndex=0;">' + plOptions + '</select>' : '')
+            + '<button class="fl-play" onclick="flowPlay(' + realIdx + ',\'audio\')">&#9654; Ecouter</button>'
+            + '<button class="fl-play fl-play-vid" onclick="flowPlay(' + realIdx + ',\'video\')">&#9654; Video</button>'
+            + (inLib
+                ? '<span class="fl-play fl-play-already" title="Deja telecharge">&#10003; DL</span>'
+                : '<button class="fl-play fl-play-dl" onclick="flowDownload(' + realIdx + ', this)">&#11015; DL</button>')
+            + '<button class="fl-remove" onclick="flowRemove(\'' + t.id + '\')" title="Retirer">&#10005;</button>'
+            + '</div>';
+    }).join('');
+}
+
+// Drag & Drop
+function flowDragStart(event, idx) {
+    const t = flowTracks[idx];
+    if (!t) return;
+    event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'flow', id: t.id, idx: idx }));
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function histDragStart(event, idx) {
+    const h = historyCache[idx];
+    if (!h || !h.url) { event.preventDefault(); return; }
+    event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'history', idx: idx }));
+    event.dataTransfer.effectAllowed = 'copy';
+}
+
+async function flowDropOnTab(event) {
+    event.preventDefault();
+    return flowDropOnPlaylist(event, '');
+}
+
+async function flowDropOnPlaylist(event, playlist) {
+    event.preventDefault();
+    let data;
+    try { data = JSON.parse(event.dataTransfer.getData('text/plain')); } catch (e) { return; }
+
+    if (data.type === 'flow') {
+        // Deplacer un morceau de Mon Flow vers une playlist
+        await fetch('api/flow', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=move&id=' + data.id + '&playlist=' + encodeURIComponent(playlist)
+        });
+        loadFlow();
+    } else if (data.type === 'history') {
+        // Ajouter depuis l'historique vers Mon Flow dans cette playlist
+        const h = historyCache[data.idx];
+        if (!h || !h.url) return;
+        await fetch('api/flow', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add&url=' + encodeURIComponent(h.url)
+                + '&title=' + encodeURIComponent(h.title || '')
+                + '&channel=' + encodeURIComponent(h.channel || '')
+                + '&thumbnail=' + encodeURIComponent(h.thumbnail || '')
+                + '&views=' + encodeURIComponent(h.views || '')
+                + '&year=' + encodeURIComponent(h.year || '')
+                + '&format=' + encodeURIComponent(h.format || '')
+                + '&type=' + encodeURIComponent(h.type || 'audio')
+                + '&playlist=' + encodeURIComponent(playlist)
+        });
+        loadFlow();
+    }
+}
+
+function sortFlow() {
+    const sort = document.getElementById('flowSortBy').value;
+    flowTracks.sort((a, b) => {
+        switch (sort) {
+            case 'added-desc': return (b.addedAt || '').localeCompare(a.addedAt || '');
+            case 'added-asc': return (a.addedAt || '').localeCompare(b.addedAt || '');
+            case 'title-asc': return (a.title || '').localeCompare(b.title || '', 'fr');
+            case 'title-desc': return (b.title || '').localeCompare(a.title || '', 'fr');
+            case 'channel-asc': return (a.channel || '').localeCompare(b.channel || '', 'fr');
+            case 'plays-desc': return (b.playCount || 0) - (a.playCount || 0);
+            case 'plays-asc': return (a.playCount || 0) - (b.playCount || 0);
+            case 'recent-play': return (b.lastPlayed || '').localeCompare(a.lastPlayed || '');
+            case 'type-audio': return (a.type === 'audio' ? 0 : 1) - (b.type === 'audio' ? 0 : 1);
+            case 'type-video': return (a.type === 'video' ? 0 : 1) - (b.type === 'video' ? 0 : 1);
+            default: return 0;
+        }
+    });
+    renderFlow();
+}
+
+function flowFilterPlaylist(pl, el) {
+    flowCurrentPlaylist = pl;
+    document.querySelectorAll('.flow-pl-chip').forEach(c => c.classList.remove('active'));
+    if (el) el.classList.add('active');
+    renderFlow();
+}
+
+function filterFlow() { renderFlow(); }
+
+async function flowPlay(idx, type) {
+    const t = flowTracks[idx];
+    if (!t || !t.url) return;
+
+    const bar = document.getElementById('playerBar');
+    const mainAudio = document.getElementById('audioEl');
+    const videoOverlay = document.getElementById('videoOverlay');
+
+    // Arreter la lecture en cours
+    mainAudio.pause();
+    mainAudio.src = '';
+
+    flowCurrentIdx = idx;
+    flowCurrentType = type || 'audio';
+
+    // Afficher le player bar
+    bar.classList.add('active');
+    document.body.classList.add('player-open');
+
+    let thumb = t.thumbnail || '';
+    if (!thumb && t.url) { const m = t.url.match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+
+    document.getElementById('playerThumb').src = thumb;
+    document.getElementById('playerTitle').textContent = t.title || 'Chargement...';
+    document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Streaming';
+    document.getElementById('btnPlayPause').innerHTML = '&#9654;';
+
+    // Marquer visuellement
+    document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
+    const trackEl = document.querySelector('.flow-track[data-idx="' + idx + '"]');
+    if (trackEl) trackEl.classList.add('fl-playing');
+
+    // Mettre a jour le "suivant"
+    const nextIdx = getNextFlowIdx(idx);
+    const nextEl = document.getElementById('playerNext');
+    if (nextIdx !== -1 && flowTracks[nextIdx]) {
+        const nt = flowTracks[nextIdx];
+        let nThumb = nt.thumbnail || '';
+        if (!nThumb && nt.url) { const m = nt.url.match(/[?&]v=([^&]+)/); if (m) nThumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+        document.getElementById('playerNextTitle').textContent = nt.title || '';
+        document.getElementById('playerNextThumb').src = nThumb;
+        document.getElementById('playerNextThumb').style.display = nThumb ? '' : 'none';
+        if (nextEl) nextEl.style.display = 'flex';
+    } else {
+        if (nextEl) nextEl.style.display = 'none';
+    }
+
+    // Enregistrer la lecture
+    fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=play&id=' + t.id }).catch(() => {});
+
+    // Video = iframe YouTube
+    if (type === 'video') {
+        playYoutubeVideo(t.url, t.title);
+        return;
+    }
+
+    // Audio = streaming
+    closeVideoPlayer();
+    try {
+        let streamUrl;
+        if (flowPreloaded && flowPreloaded.idx === idx && flowPreloaded.type === type) {
+            streamUrl = flowPreloaded.streamUrl;
+            flowPreloaded = null;
+        } else {
+            document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Chargement...';
+            const resp = await fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + type);
+            const data = await resp.json();
+            if (!data.success) {
+                document.getElementById('playerArtist').textContent = 'Erreur : flux indisponible';
+                return;
+            }
+            streamUrl = data.streamUrl;
+        }
+
+        mainAudio.src = streamUrl;
+        mainAudio.volume = document.getElementById('volumeSlider').value / 100;
+        mainAudio.play().catch(() => {});
+
+        document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Streaming';
+        document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
+
+        // Pre-charger le suivant
+        flowPreloadNext(idx, 'audio');
+
+        // A la fin, passer au suivant
+        mainAudio.onended = function() { flowNext('audio'); };
+
+    } catch (e) {
+        document.getElementById('playerArtist').textContent = 'Erreur de connexion';
+    }
+}
+
+function getNextFlowIdx(currentIdx) {
+    const visible = flowGetVisibleTracks();
+    if (flowShuffle) {
+        const others = visible.filter(i => i !== currentIdx);
+        return others.length > 0 ? others[Math.floor(Math.random() * others.length)] : -1;
+    }
+    const curPos = visible.indexOf(currentIdx);
+    return (curPos >= 0 && curPos < visible.length - 1) ? visible[curPos + 1] : -1;
+}
+
+function flowGetVisibleTracks() {
+    const els = document.querySelectorAll('.flow-track');
+    return Array.from(els).map(el => parseInt(el.dataset.idx)).filter(i => flowTracks[i]);
+}
+
+function flowNext(type) {
+    type = type || flowCurrentType || 'audio';
+    const visible = flowGetVisibleTracks();
+    if (visible.length === 0) return;
+
+    let nextIdx;
+    if (flowShuffle) {
+        const others = visible.filter(i => i !== flowCurrentIdx);
+        if (others.length === 0) return;
+        nextIdx = others[Math.floor(Math.random() * others.length)];
+    } else {
+        const curPos = visible.indexOf(flowCurrentIdx);
+        if (curPos === -1 || curPos >= visible.length - 1) {
+            document.getElementById('flowMeta').textContent = 'Fin de la liste';
+            return;
+        }
+        nextIdx = visible[curPos + 1];
+    }
+    flowPlay(nextIdx, type);
+}
+
+function flowPrev() {
+    const visible = flowGetVisibleTracks();
+    const curPos = visible.indexOf(flowCurrentIdx);
+    if (curPos <= 0) return;
+    flowPlay(visible[curPos - 1], flowCurrentType || 'audio');
+}
+
+function flowToggleShuffle() {
+    flowShuffle = !flowShuffle;
+    document.getElementById('flowShuffleBtn').classList.toggle('active', flowShuffle);
+}
+
+function flowStop() {
+    const mainAudio = document.getElementById('audioEl');
+    mainAudio.pause();
+    mainAudio.src = '';
+    mainAudio.onended = null;
+    document.getElementById('playerBar').classList.remove('active');
+    document.body.classList.remove('player-open');
+    document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
+    flowCurrentIdx = -1;
+    flowPreloaded = null;
+}
+
+function flowPreloadNext(currentIdx, type) {
+    const visible = flowGetVisibleTracks();
+    const curPos = visible.indexOf(currentIdx);
+    let nextIdx;
+    if (flowShuffle) {
+        const others = visible.filter(i => i !== currentIdx);
+        nextIdx = others.length > 0 ? others[Math.floor(Math.random() * others.length)] : -1;
+    } else {
+        nextIdx = (curPos >= 0 && curPos < visible.length - 1) ? visible[curPos + 1] : -1;
+    }
+    if (nextIdx === -1) { flowPreloaded = null; return; }
+
+    const t = flowTracks[nextIdx];
+    fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + type)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && flowCurrentIdx === currentIdx) {
+                flowPreloaded = { idx: nextIdx, type, streamUrl: data.streamUrl };
+            }
+        })
+        .catch(() => { flowPreloaded = null; });
+}
+
+function flowShowCreatePlaylist() {
+    const el = document.getElementById('flowCreatePl');
+    el.style.display = el.style.display === 'flex' ? 'none' : 'flex';
+    if (el.style.display === 'flex') document.getElementById('flowNewPlName').focus();
+}
+
+async function flowCreatePlaylist() {
+    const name = document.getElementById('flowNewPlName').value.trim();
+    if (!name) return;
+    const resp = await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=create_playlist&name=' + encodeURIComponent(name) });
+    const data = await resp.json();
+    if (!data.success) { alert(data.error || 'Erreur'); return; }
+    document.getElementById('flowNewPlName').value = '';
+    document.getElementById('flowCreatePl').style.display = 'none';
+    loadFlow();
+}
+
+async function flowDeletePlaylist(name) {
+    if (!confirm('Supprimer la playlist "' + name + '" ?\nLes morceaux ne seront pas supprimes.')) return;
+    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=delete_playlist&name=' + encodeURIComponent(name) });
+    if (flowCurrentPlaylist === name) flowCurrentPlaylist = '';
+    loadFlow();
+}
+
+async function flowMoveTrack(id, playlist) {
+    if (playlist === '__none__') playlist = '';
+    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=move&id=' + id + '&playlist=' + encodeURIComponent(playlist) });
+    loadFlow();
+}
+
+function flowPlayAll(playlist) {
+    flowFilterPlaylist(playlist, null);
+    // Jouer le premier morceau visible
+    setTimeout(() => {
+        const first = document.querySelector('.flow-track');
+        if (first) {
+            const idx = parseInt(first.dataset.idx);
+            flowPlay(idx, 'audio');
+        }
+    }, 100);
+}
+
+function flowToggleSearch() {
+    const el = document.getElementById('flowYtSearch');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    if (el.style.display === 'block') document.getElementById('flowYtQuery').focus();
+}
+
+let flowSearchPage = 1;
+let flowSearchQuery = '';
+
+async function flowYtDoSearch(loadMore) {
+    const query = document.getElementById('flowYtQuery').value.trim();
+    if (!query) return;
+
+    const resultsDiv = document.getElementById('flowYtResults');
+
+    if (!loadMore || query !== flowSearchQuery) {
+        flowSearchPage = 1;
+        flowSearchQuery = query;
+        window._flowSearchResults = [];
+        resultsDiv.innerHTML = '<p style="color:var(--text-muted);text-align:center;">Recherche en cours...</p>';
+    } else {
+        flowSearchPage++;
+        // Retirer le bouton "Plus de resultats"
+        const moreBtn = document.getElementById('flowSearchMore');
+        if (moreBtn) moreBtn.textContent = 'Chargement...';
+    }
+
+    const max = 30;
+    const total = max * flowSearchPage;
+
+    try {
+        const resp = await fetch('api/search?q=' + encodeURIComponent(query) + '&max=' + total);
+        const data = await resp.json();
+        if (!data.success || !data.results || data.results.length === 0) {
+            if (flowSearchPage === 1) {
+                resultsDiv.innerHTML = '<p style="color:var(--text-muted);text-align:center;">Aucun resultat.</p>';
+            }
+            return;
+        }
+
+        // Ne garder que les nouveaux resultats (apres ceux deja affiches)
+        const allResults = data.results;
+        window._flowSearchResults = allResults;
+
+        const existingUrls = new Set(flowTracks.map(t => { const m = (t.url || '').match(/[?&]v=([^&]+)/); return m ? m[1] : ''; }).filter(Boolean));
+
+        let html = allResults.map((r, i) => {
+            const vid = (r.url || '').match(/[?&]v=([^&]+)/);
+            const vidId = vid ? vid[1] : '';
+            const alreadyIn = vidId && existingUrls.has(vidId);
+            const thumb = r.thumbnail || (vidId ? 'https://i.ytimg.com/vi/' + vidId + '/mqdefault.jpg' : '');
+            return '<div class="flow-track" style="border-bottom:1px solid var(--border);">'
+                + (thumb ? '<img class="fl-thumb" src="' + thumb + '" loading="lazy">' : '')
+                + '<div class="fl-body">'
+                + '<span class="fl-title">' + (r.title || '') + '</span>'
+                + '<span class="fl-info">' + [r.channel, r.duration].filter(Boolean).join(' · ') + '</span>'
+                + '</div>'
+                + (alreadyIn
+                    ? '<span style="font-size:11px;color:var(--success);font-weight:600;flex-shrink:0;">Deja dans Mon Flow</span>'
+                    : '<button class="fl-play" onclick="flowAddFromSearch(' + i + ')" id="flowSearchAdd' + i + '">+ Ajouter</button>')
+                + '<button class="fl-play" style="background:var(--primary);" onclick="flowPlayPreview(\'' + encodeURIComponent(r.url) + '\')">&#9654;</button>'
+                + '</div>';
+        }).join('');
+
+        // Bouton "Plus de resultats"
+        html += '<div style="text-align:center;padding:12px;">'
+            + '<button id="flowSearchMore" onclick="flowYtDoSearch(true)" style="background:#9C27B0;color:#fff;border:none;padding:8px 24px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Charger plus de resultats (' + allResults.length + ' affiches)</button>'
+            + '</div>';
+
+        resultsDiv.innerHTML = html;
+    } catch (e) {
+        if (flowSearchPage === 1) {
+            resultsDiv.innerHTML = '<p style="color:var(--text-muted);text-align:center;">Erreur de recherche.</p>';
+        }
+    }
+}
+
+async function flowAddFromSearch(idx) {
+    const r = window._flowSearchResults[idx];
+    if (!r) return;
+    const btn = document.getElementById('flowSearchAdd' + idx);
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
+
+    try {
+        // Recuperer les infos completes
+        const infoResp = await fetch('api/info', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'url=' + encodeURIComponent(r.url) });
+        const info = await infoResp.json();
+
+        await fetch('api/flow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add&url=' + encodeURIComponent(r.url)
+                + '&title=' + encodeURIComponent(info.success ? info.title : r.title || '')
+                + '&channel=' + encodeURIComponent(info.success ? info.channel : r.channel || '')
+                + '&thumbnail=' + encodeURIComponent(info.success ? info.thumbnail : r.thumbnail || '')
+                + '&duration=' + encodeURIComponent(info.success ? info.duration : r.duration || '')
+                + '&views=' + encodeURIComponent(info.success ? info.views_display : '')
+                + '&year=' + encodeURIComponent(info.success ? info.year : '')
+        });
+
+        if (btn) { btn.textContent = 'Ajoute !'; btn.style.background = 'var(--success)'; }
+        loadFlow();
+    } catch (e) {
+        if (btn) { btn.textContent = 'Erreur'; btn.style.background = 'var(--error)'; }
+    }
+}
+
+async function flowPlayPreview(encodedUrl) {
+    const url = decodeURIComponent(encodedUrl);
+    const audioEl = document.getElementById('flowAudio');
+    const playerDiv = document.getElementById('flowPlayer');
+    const titleEl = document.getElementById('flowTitle');
+    const metaEl = document.getElementById('flowMeta');
+    const thumbEl = document.getElementById('flowThumb');
+
+    playerDiv.style.display = 'block';
+    titleEl.textContent = 'Apercu...';
+    metaEl.textContent = 'Chargement...';
+    const m = url.match(/[?&]v=([^&]+)/);
+    if (m) thumbEl.src = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg';
+
+    try {
+        const resp = await fetch('api/stream?url=' + encodeURIComponent(url) + '&type=audio');
+        const data = await resp.json();
+        if (!data.success) { metaEl.textContent = 'Erreur'; return; }
+        document.getElementById('flowVideo').style.display = 'none';
+        audioEl.style.display = 'block';
+        audioEl.src = data.streamUrl;
+        audioEl.play().catch(() => {});
+        metaEl.textContent = 'Apercu - Streaming';
+    } catch (e) { metaEl.textContent = 'Erreur'; }
+}
+
+async function flowAddByUrl() {
+    const url = prompt('Colle une URL YouTube :');
+    if (!url || !url.includes('youtu')) return;
+
+    try {
+        const infoResp = await fetch('api/info', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'url=' + encodeURIComponent(url) });
+        const info = await infoResp.json();
+        if (!info.success) { alert('Impossible de recuperer les infos.'); return; }
+
+        await fetch('api/flow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add&url=' + encodeURIComponent(url)
+                + '&title=' + encodeURIComponent(info.title || '')
+                + '&channel=' + encodeURIComponent(info.channel || '')
+                + '&thumbnail=' + encodeURIComponent(info.thumbnail || '')
+                + '&duration=' + encodeURIComponent(info.duration || '')
+                + '&views=' + encodeURIComponent(info.views_display || '')
+                + '&year=' + encodeURIComponent(info.year || '')
+        });
+        loadFlow();
+    } catch (e) { alert('Erreur.'); }
+}
+
+async function flowDownload(idx, btn) {
+    const t = flowTracks[idx];
+    if (!t || !t.url) return;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    const dlFormatSel = document.getElementById('flowDlFormat') ? document.getElementById('flowDlFormat').value : 'audio:mp3';
+    const dlParts = dlFormatSel.split(':');
+    const type = dlParts[0];
+    const format = dlParts[1];
+    const quality = type === 'video' ? 'best' : '0';
+
+    try {
+
+        const dlResp = await fetch('api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'url=' + encodeURIComponent(t.url) + '&type=' + type + '&format=' + format + '&quality=' + quality + '&cover=1'
+        });
+        const dlData = await dlResp.json();
+
+        if (!dlData.success) {
+            btn.textContent = 'Erreur';
+            btn.style.background = 'var(--error)';
+            setTimeout(() => { btn.textContent = '⬇ DL'; btn.style.background = ''; btn.disabled = false; }, 3000);
+            return;
+        }
+
+        btn.textContent = '0%';
+        btn.style.background = '#2196F3';
+
+        // Suivre la progression
+        const poll = setInterval(async () => {
+            try {
+                const pResp = await fetch('api/progress?id=' + dlData.jobId);
+                const pData = await pResp.json();
+
+                if (pData.status === 'done') {
+                    clearInterval(poll);
+                    btn.textContent = 'OK!';
+                    btn.style.background = 'var(--success)';
+
+                    // Ajouter a la bibliotheque
+                    fetch('api/library', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'action=add_item&file=' + encodeURIComponent(pData.file || '')
+                            + '&title=' + encodeURIComponent(t.title || '')
+                            + '&type=' + type + '&format=' + format
+                            + '&folder=&thumbnail=' + encodeURIComponent(t.thumbnail || '')
+                            + '&channel=' + encodeURIComponent(t.channel || '')
+                            + '&duration=' + encodeURIComponent(t.duration || '')
+                            + '&cover=' + encodeURIComponent(pData.cover || '')
+                            + '&url=' + encodeURIComponent(t.url || '')
+                    }).catch(() => {});
+
+                    // Ajouter a l'historique
+                    fetch('api/history', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'action=add&title=' + encodeURIComponent(t.title || '') + '&status=success'
+                            + '&format=' + format + '&type=' + (t.type || 'audio')
+                            + '&url=' + encodeURIComponent(t.url || '')
+                            + '&channel=' + encodeURIComponent(t.channel || '')
+                            + '&thumbnail=' + encodeURIComponent(t.thumbnail || '')
+                    }).catch(() => {});
+
+                    setTimeout(() => { btn.textContent = '⬇ DL'; btn.style.background = ''; btn.disabled = false; }, 3000);
+                } else if (pData.status === 'error') {
+                    clearInterval(poll);
+                    btn.textContent = 'Erreur';
+                    btn.style.background = 'var(--error)';
+                    setTimeout(() => { btn.textContent = '⬇ DL'; btn.style.background = ''; btn.disabled = false; }, 3000);
+                } else {
+                    btn.textContent = (pData.percent || 0) + '%';
+                }
+            } catch (e) {}
+        }, 1500);
+
+    } catch (e) {
+        btn.textContent = 'Erreur';
+        setTimeout(() => { btn.textContent = '⬇ DL'; btn.style.background = ''; btn.disabled = false; }, 3000);
+    }
+}
+
+async function flowRemove(id) {
+    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=remove&id=' + id });
+    loadFlow();
+}
+
+async function flowAddFromHistory() {
+    // Ajouter tous les elements de l'historique qui ont une URL
+    try {
+        const resp = await fetch('api/history?action=list');
+        const data = await resp.json();
+        if (!data.success || !data.history) return;
+
+        const items = data.history.filter(h => h.url && h.status === 'success');
+        if (items.length === 0) { alert('Aucun element dans l\'historique.'); return; }
+
+        const addResp = await fetch('api/flow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
+        });
+        const addData = await addResp.json();
+        alert(addData.added + ' titre(s) ajoute(s) a Mon Flow' + (items.length - addData.added > 0 ? '\n' + (items.length - addData.added) + ' doublon(s) ignore(s)' : ''));
+        loadFlow();
+    } catch (e) { alert('Erreur.'); }
+}
+
+function flowExport() {
+    const blob = new Blob([JSON.stringify(flowTracks, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'mon_flow_' + new Date().toISOString().split('T')[0] + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+function flowImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const items = JSON.parse(e.target.result);
+            if (!Array.isArray(items)) { alert('Fichier invalide.'); return; }
+            const resp = await fetch('api/flow', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
+            });
+            const data = await resp.json();
+            alert(data.added + ' titre(s) importe(s)');
+            loadFlow();
+        } catch (err) { alert('Erreur de lecture.'); }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+// Charger Mon Flow quand on switch sur l'onglet
+const origSwitchTab = typeof switchTab === 'function' ? switchTab : null;
+
 function toggleHistory() {
     const panel = document.getElementById('historyPanel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-    if (panel.style.display === 'block') loadHistory();
+    const libElements = ['foldersBar', 'bigActionBtns', 'itemsGrid', 'emptyLib', 'libSearch', 'libFilterChips'];
+    const showing = panel.style.display === 'none';
+    panel.style.display = showing ? 'block' : 'none';
+    libElements.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = showing ? 'none' : '';
+    });
+    if (showing) loadHistory();
 }
 
 // ========== SYSTEM INFO / YTDLP UPDATE ==========
+async function loadCacheStats() {
+    try {
+        const resp = await fetch('api/system?action=cache_stats');
+        const data = await resp.json();
+        if (!data.success) return;
+        const el = document.getElementById('cacheStats');
+        if (!el) return;
+        const c = data.cache;
+        let html = '';
+        for (const name in c) {
+            const ttlMin = Math.round(c[name].ttl / 60000);
+            html += '<div>' + name + ' : <strong>' + c[name].entries + '</strong> entree(s) (TTL: ' + ttlMin + ' min)</div>';
+        }
+        if (!html) html = 'Cache vide.';
+        el.innerHTML = html;
+    } catch (e) {}
+}
+
+async function clearCache() {
+    try {
+        await fetch('api/system?action=cache_clear');
+        loadCacheStats();
+    } catch (e) {}
+}
+
 async function loadSystemInfo() {
     try {
         const resp = await fetch('api/system?action=info');

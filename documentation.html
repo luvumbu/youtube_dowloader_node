@@ -362,6 +362,18 @@
     <div class="section-title">Reference</div>
     <a href="#api-reference">Reference API complete</a>
     <a href="#formats">Formats supportes</a>
+    <a href="#historique">Historique et Re-telechargement</a>
+    <a href="#monflow">Mon Flow (Streaming)</a>
+    <a href="#extension-v2">Extension Chrome v2</a>
+    <a href="#recherche">Onglet Recherche</a>
+    <a href="#video-iframe">Lecture video (iframe)</a>
+    <a href="#compteur">Compteur d'ecoutes</a>
+    <a href="#telechargement-flow">Telecharger depuis Mon Flow</a>
+    <a href="#persistence">Sauvegarde et reprise</a>
+    <a href="#tri">Tri et filtres</a>
+    <a href="#dragdrop">Drag &amp; Drop</a>
+    <a href="#performances">Performances et consommation</a>
+    <a href="#logs">Logs techniques</a>
     <a href="#depannage">Depannage</a>
 </nav>
 
@@ -1307,6 +1319,481 @@ Body: { "url": "...", "type": "audio", "format": "mp3", "quality": "0", "cover":
     <!-- ======================= -->
     <!-- DEPANNAGE               -->
     <!-- ======================= -->
+    <h2 id="historique">Historique et Re-telechargement</h2>
+
+    <p>
+        Le systeme garde un historique complet de tous les telechargements (titre, URL, format, artiste, date, thumbnail).
+        Cet historique permet de <strong>re-telecharger</strong> sa collection sur un autre PC ou apres une perte de fichiers.
+    </p>
+
+    <h3>Acceder a l'historique</h3>
+    <p>
+        Aller dans l'onglet <strong>Bibliotheque</strong>, puis cliquer sur le bouton <strong>Historique</strong> en haut.
+        L'historique remplace la vue bibliotheque (cliquer a nouveau pour revenir).
+    </p>
+
+    <h3>Contenu de l'historique</h3>
+    <p>Chaque element affiche :</p>
+    <ul>
+        <li><strong>Thumbnail YouTube</strong> - image de la video</li>
+        <li><strong>Titre</strong> - nom de la video</li>
+        <li><strong>Artiste / Vues / Annee / Likes</strong> - metadonnees</li>
+        <li><strong>Format</strong> (MP3, MP4...) et <strong>Type</strong> (Audio/Video)</li>
+        <li><strong>Badge "Dans la biblio"</strong> + bordure verte si le fichier est deja present dans la bibliotheque</li>
+        <li><strong>Case a cocher</strong> pour selectionner l'element</li>
+    </ul>
+
+    <h3>Re-telecharger des elements</h3>
+    <ol>
+        <li>Cocher les elements voulus (ou "Tout cocher")</li>
+        <li>Choisir le <strong>format</strong> dans le selecteur : MP3, FLAC, WAV, AAC, OGG, MP4, MKV, WEBM, ou "Format d'origine"</li>
+        <li>Cliquer <strong>Re-telecharger la selection</strong></li>
+        <li>La file de re-telechargement s'affiche avec pour chaque element :
+            <ul>
+                <li>Thumbnail + titre + artiste</li>
+                <li>Barre de progression en temps reel (bleue)</li>
+                <li>Pourcentage en gros a droite</li>
+                <li>Statut : En attente &rarr; Connexion &rarr; Telechargement XX% &rarr; Termine (vert) ou Erreur (rouge)</li>
+            </ul>
+        </li>
+        <li>Les elements <strong>deja dans la bibliotheque</strong> sont affiches en grise avec le message "Deja dans la bibliotheque" et sont <strong>sautes automatiquement</strong> (pas d'alerte bloquante)</li>
+        <li>Un delai de 3 secondes est ajoute entre chaque telechargement pour eviter le blocage YouTube (erreur 429)</li>
+    </ol>
+
+    <h3>Exporter / Importer une liste</h3>
+    <div class="warning-box">
+        <strong>Transferer sa collection sur un autre PC :</strong>
+        <ol>
+            <li>Sur l'ancien PC : cliquer <strong>Exporter la liste</strong> &rarr; sauvegarde un fichier <code>.json</code></li>
+            <li>Copier ce fichier sur le nouveau PC</li>
+            <li>Sur le nouveau PC : cliquer <strong>Importer une liste</strong> &rarr; charger le fichier</li>
+            <li>Cocher tout, choisir le format, re-telecharger</li>
+        </ol>
+    </div>
+
+    <h2 id="monflow">Mon Flow (Streaming)</h2>
+
+    <p>
+        <strong>Mon Flow</strong> est un systeme de streaming integre qui fonctionne comme un <strong>Spotify personnel</strong>.
+        Il permet d'ecouter de la musique directement depuis YouTube sans telecharger les fichiers.
+    </p>
+
+    <h3>Principe de fonctionnement</h3>
+    <ul>
+        <li>Ajouter des morceaux a Mon Flow <strong>sans les telecharger</strong></li>
+        <li>Ecouter en <strong>streaming direct</strong> depuis YouTube</li>
+        <li>Les fichiers deja telecharges sont lus <strong>en local</strong> (plus rapide, pas de streaming)</li>
+        <li>Le <strong>player bar en bas</strong> est le meme que pour la bibliotheque locale</li>
+    </ul>
+
+    <h3>Acceder a Mon Flow</h3>
+    <p>Cliquer sur l'onglet <strong>"Mon Flow"</strong> dans la barre de navigation (entre Bibliotheque et Profil).</p>
+
+    <h3>Ajouter des morceaux</h3>
+    <p>Plusieurs methodes :</p>
+    <ol>
+        <li><strong>"+ Depuis l'historique"</strong> : importe tous les telechargements passes</li>
+        <li><strong>"Rechercher sur YouTube"</strong> (violet) : chercher des titres et les ajouter avec apercu audio</li>
+        <li><strong>"+ Ajouter par URL"</strong> : coller une URL YouTube</li>
+        <li><strong>Bouton "+ Flow"</strong> dans l'historique : ajouter un element individuel</li>
+        <li><strong>Drag &amp; drop</strong> depuis l'historique vers l'onglet Mon Flow</li>
+        <li><strong>Extension Chrome</strong> : bouton violet "+F" sur YouTube ou "+ Ajouter a Mon Flow" dans le panneau</li>
+        <li><strong>Import</strong> : charger un fichier JSON exporte depuis un autre PC</li>
+    </ol>
+
+    <h3>Playlists</h3>
+    <ul>
+        <li><strong>"+ Nouvelle playlist"</strong> : creer une playlist (ex: "Rap FR", "Chill", "Workout")</li>
+        <li><strong>Menu deroulant</strong> sur chaque morceau pour le deplacer dans une playlist</li>
+        <li><strong>Drag &amp; drop</strong> : glisser un morceau sur un chip de playlist pour le deplacer</li>
+        <li><strong>Filtrer</strong> par playlist avec les chips en haut</li>
+        <li><strong>Bouton &#9654;</strong> sur un chip pour lire toute la playlist</li>
+        <li><strong>Bouton &times;</strong> pour supprimer une playlist (les morceaux restent)</li>
+        <li>Chaque morceau affiche un <strong>tag violet</strong> avec le nom de sa playlist</li>
+    </ul>
+
+    <h3>Lecture et Player</h3>
+    <ul>
+        <li><strong>"&#9654; Ecouter"</strong> : lance l'audio en streaming dans le player bar en bas</li>
+        <li><strong>"&#9654; Video"</strong> : lance la video en streaming</li>
+        <li>Le <strong>player bar en bas</strong> affiche : thumbnail, titre, artiste, barre de progression, controles</li>
+        <li>Boutons <strong>precedent / suivant</strong> du player : passent au morceau precedent/suivant de Mon Flow</li>
+        <li><strong>Mode aleatoire</strong> : lecture dans un ordre aleatoire</li>
+        <li><strong>Pre-chargement</strong> : le morceau suivant est prepare en avance pour enchainer sans coupure</li>
+        <li><strong>Lecture locale automatique</strong> : si le fichier est deja telecharge, il est lu en local (instantane)</li>
+    </ul>
+
+    <h3>Streaming - Comment ca marche</h3>
+    <div class="warning-box">
+        <strong>Le flux audio/video passe par le serveur local :</strong>
+        <ol>
+            <li>Le frontend demande <code>/api/stream?url=...&amp;type=audio</code></li>
+            <li>Le serveur lance <code>yt-dlp --get-url</code> pour obtenir l'URL directe YouTube</li>
+            <li>Le serveur <strong>proxy le flux</strong> vers le navigateur avec <code>Content-Type: audio/mp4</code></li>
+            <li>Le navigateur lit le flux dans le player (pas de telechargement propose)</li>
+            <li>Les URLs sont <strong>cachees 4h</strong> pour ne pas re-solliciter YouTube</li>
+        </ol>
+    </div>
+
+    <h3>Tri et recherche</h3>
+    <ul>
+        <li><strong>Barre de recherche</strong> : filtrer par titre ou artiste</li>
+        <li><strong>Menu de tri</strong> : par date d'ajout, titre A-Z/Z-A, artiste A-Z, type audio/video</li>
+    </ul>
+
+    <h3>Export / Import</h3>
+    <ul>
+        <li><strong>Exporter</strong> : sauvegarde la collection en fichier JSON</li>
+        <li><strong>Importer</strong> : charge un fichier JSON (les doublons sont ignores)</li>
+        <li>Permet de <strong>transferer sa collection</strong> entre PC et d'ecouter en streaming sans re-telecharger</li>
+    </ul>
+
+    <h2 id="extension-v2">Extension Chrome v2</h2>
+
+    <p>
+        L'extension v2 (<code>extension_v2/</code>) ajoute le support de Mon Flow en plus du telechargement.
+    </p>
+
+    <h3>Installation</h3>
+    <ol>
+        <li>Ouvrir <code>chrome://extensions/</code></li>
+        <li>Activer le <strong>"Mode developpeur"</strong></li>
+        <li>Cliquer <strong>"Charger l'extension non empaquetee"</strong></li>
+        <li>Selectionner le dossier <code>extension_v2/</code></li>
+    </ol>
+
+    <h3>Boutons flottants sur YouTube</h3>
+    <p>En bas a droite de chaque page YouTube :</p>
+    <ul>
+        <li><strong>Bouton DL</strong> (gris) : telechargement rapide avec les preferences sauvegardees</li>
+        <li><strong>Bouton +F</strong> (violet) : ajouter la video a Mon Flow en un clic, sans telecharger</li>
+        <li><strong>Bouton Options</strong> : ouvrir le panneau complet avec format, qualite, et section Mon Flow</li>
+    </ul>
+
+    <h3>Panneau Options (sur la page YouTube)</h3>
+    <ul>
+        <li>Selection du format et de la qualite</li>
+        <li>Bouton "Telecharger" et "+ File d'attente"</li>
+        <li><strong>Section Mon Flow</strong> en bas :
+            <ul>
+                <li>Selecteur de playlist (choisir dans quelle playlist ajouter)</li>
+                <li>Bouton "+" pour creer une nouvelle playlist</li>
+                <li>Bouton <strong>"+ Ajouter a Mon Flow"</strong> (violet)</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>Playlists YouTube</h3>
+    <p>Quand une playlist YouTube est detectee, une banniere apparait avec :</p>
+    <ul>
+        <li><strong>"Tout telecharger"</strong> (rouge) : telecharge tous les elements</li>
+        <li><strong>"+ Mon Flow"</strong> (violet) : ajoute toute la playlist a Mon Flow
+            <ul>
+                <li>La playlist est <strong>creee automatiquement</strong> dans Mon Flow avec le nom de la playlist YouTube</li>
+                <li>Tous les morceaux sont ajoutes dans cette playlist</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h2 id="recherche">Onglet Recherche - Guide detaille</h2>
+
+    <h3>Rechercher</h3>
+    <ol>
+        <li>Aller dans l'onglet <strong>Recherche</strong></li>
+        <li>Taper un titre, un artiste, ou des mots-cles</li>
+        <li>Appuyer sur Entree ou cliquer Rechercher</li>
+        <li>Les resultats s'affichent avec thumbnail, titre, artiste, duree</li>
+    </ol>
+
+    <h3>Pour chaque resultat</h3>
+    <ul>
+        <li><strong>DL</strong> : telecharge le fichier directement</li>
+        <li><strong>+ File</strong> : ajoute a la file d'attente de telechargement</li>
+        <li><strong>+ Flow</strong> (violet) : ajoute a Mon Flow sans telecharger</li>
+        <li><strong>&#9654; Video</strong> (bleu) : regarde la video en iframe YouTube</li>
+    </ul>
+
+    <h3>Actions globales</h3>
+    <ul>
+        <li><strong>"Tout telecharger"</strong> : telecharge tous les resultats affiches</li>
+        <li><strong>"+ Tout dans Mon Flow"</strong> (violet) : ajoute tout a Mon Flow</li>
+    </ul>
+
+    <h3>Pagination</h3>
+    <p>Bouton <strong>"Charger plus de resultats"</strong> en bas - charge 20 resultats supplementaires a chaque clic (jusqu'a 50).</p>
+
+    <h3>Detection automatique</h3>
+    <ul>
+        <li>Badge <strong>"&#10003; DL"</strong> vert + bordure verte si deja telecharge</li>
+        <li>Bouton <strong>"&#10003; Flow"</strong> gris + bordure violette si deja dans Mon Flow</li>
+    </ul>
+
+    <h2 id="video-iframe">Lecture video - iframe YouTube</h2>
+
+    <p>
+        Partout dans l'application (Recherche, Historique, Mon Flow), le bouton <strong>"&#9654; Video"</strong>
+        ouvre la video dans un <strong>iframe YouTube</strong> en overlay. Cela garantit une lecture fiable
+        car c'est le player YouTube officiel qui est utilise.
+    </p>
+    <ul>
+        <li>Autoplay automatique</li>
+        <li>Plein ecran disponible</li>
+        <li>Bouton <strong>&times;</strong> pour fermer</li>
+        <li>Fonctionne pour toutes les videos (watch, shorts, etc.)</li>
+    </ul>
+
+    <h2 id="compteur">Compteur d'ecoutes</h2>
+
+    <p>
+        Chaque morceau dans Mon Flow enregistre automatiquement le <strong>nombre d'ecoutes</strong>
+        et la <strong>date de derniere ecoute</strong>.
+    </p>
+    <ul>
+        <li>Badge rouge <strong>"3x"</strong> sur chaque morceau (visible si au moins 1 ecoute)</li>
+        <li>Tri <strong>"Plus ecoutes"</strong> pour voir ses morceaux preferes</li>
+        <li>Tri <strong>"Ecoute recemment"</strong> pour voir ses dernieres ecoutes</li>
+        <li>Le compteur s'incremente a chaque lancement de lecture (audio ou video)</li>
+    </ul>
+
+    <h2 id="telechargement-flow">Telecharger depuis Mon Flow</h2>
+
+    <ol>
+        <li>Dans Mon Flow, choisir le <strong>format</strong> dans le selecteur en haut (MP3, FLAC, MP4, etc.)</li>
+        <li>Les morceaux deja telecharges dans ce format affichent <strong>"&#10003; DL"</strong> en gris + badge vert + bordure verte</li>
+        <li>Cliquer <strong>"&#11015; DL"</strong> (vert) sur un morceau non telecharge</li>
+        <li>Le bouton affiche la progression : <strong>0% &rarr; 50% &rarr; OK!</strong></li>
+        <li>Le fichier est ajoute automatiquement a la bibliotheque et a l'historique</li>
+        <li>Si on change de format, les badges se mettent a jour automatiquement</li>
+    </ol>
+
+    <h2 id="persistence">Sauvegarde et reprise de lecture</h2>
+
+    <p>
+        Quand un morceau joue dans Mon Flow, l'etat est sauvegarde en permanence dans le navigateur
+        (<code>localStorage</code>). Si la page est rafraichie :
+    </p>
+    <ol>
+        <li>Le player bar reapparait avec le meme morceau</li>
+        <li>Le flux streaming est re-recupere depuis YouTube</li>
+        <li>La lecture reprend a la <strong>meme position</strong> (meme seconde)</li>
+        <li>La lecture continue automatiquement si elle etait en cours</li>
+        <li>Le pre-chargement du morceau suivant est relance</li>
+    </ol>
+    <div class="warning-box">
+        <strong>Note :</strong> Il y a une courte interruption (~2-3 secondes) pendant le rechargement de la page
+        car le navigateur doit re-fetcher l'URL de streaming. C'est une limitation technique du navigateur.
+    </div>
+
+    <h2 id="tri">Tri et filtres (disponibles partout)</h2>
+
+    <p>Un menu deroulant de tri est disponible dans chaque section :</p>
+
+    <h3>Bibliotheque</h3>
+    <ul>
+        <li>Date (recent / ancien)</li>
+        <li>Titre A-Z / Z-A</li>
+        <li>Type (audio / video d'abord)</li>
+        <li>Taille (gros / petit) - utilise la taille reelle du fichier</li>
+    </ul>
+
+    <h3>Historique</h3>
+    <ul>
+        <li>Date (recent / ancien)</li>
+        <li>Titre A-Z / Z-A</li>
+        <li>Type (audio / video d'abord)</li>
+    </ul>
+
+    <h3>Mon Flow</h3>
+    <ul>
+        <li>Ajout (recent / ancien)</li>
+        <li>Titre A-Z / Z-A</li>
+        <li>Artiste A-Z</li>
+        <li>Plus ecoutes / Moins ecoutes</li>
+        <li>Ecoute recemment</li>
+        <li>Type (audio / video d'abord)</li>
+    </ul>
+
+    <h2 id="dragdrop">Drag &amp; Drop</h2>
+
+    <ul>
+        <li><strong>Historique &rarr; Mon Flow</strong> : glisser un element de l'historique sur l'onglet "Mon Flow" pour l'ajouter</li>
+        <li><strong>Historique &rarr; Playlist</strong> : glisser sur un chip de playlist dans Mon Flow</li>
+        <li><strong>Mon Flow &rarr; Playlist</strong> : glisser un morceau sur un chip de playlist pour le deplacer</li>
+        <li>Les playlists s'illuminent en violet quand on survole avec un element</li>
+        <li>Les elements sont marqués <code>draggable="true"</code> avec curseur "grab"</li>
+    </ul>
+
+    <h2 id="performances">Performances et consommation</h2>
+
+    <h3>Mon Flow vs YouTube : pourquoi c'est plus leger</h3>
+
+    <p>
+        Quand tu ecoutes de la musique sur YouTube dans un navigateur, la page charge la <strong>video HD</strong>
+        (100-500 Mo), les <strong>publicites</strong>, l'<strong>interface</strong> (suggestions, commentaires, sidebar),
+        et du <strong>tracking Google</strong>. Tout ca consomme enormement de bande passante, CPU et RAM.
+    </p>
+
+    <p>
+        Mon Flow ne charge que le <strong>flux audio</strong> (format m4a, 5-10 Mo par morceau).
+        Pas de video, pas de pub, pas d'interface YouTube. Le resultat :
+    </p>
+
+    <table style="width:100%;border-collapse:collapse;margin:15px 0;">
+        <tr style="border-bottom:1px solid #333;">
+            <th style="padding:8px;text-align:left;color:#ff4444;"></th>
+            <th style="padding:8px;text-align:left;color:#888;">YouTube</th>
+            <th style="padding:8px;text-align:left;color:#4CAF50;">Mon Flow</th>
+            <th style="padding:8px;text-align:left;color:#2196F3;">Economie</th>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>Donnees</strong></td>
+            <td style="padding:8px;">100-500 Mo/morceau</td>
+            <td style="padding:8px;">5-10 Mo/morceau</td>
+            <td style="padding:8px;color:#4CAF50;font-weight:bold;">10-50x moins</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>Pubs</strong></td>
+            <td style="padding:8px;">Oui</td>
+            <td style="padding:8px;">Aucune</td>
+            <td style="padding:8px;color:#4CAF50;font-weight:bold;">100%</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>RAM</strong></td>
+            <td style="padding:8px;">300-500 Mo</td>
+            <td style="padding:8px;">~50 Mo</td>
+            <td style="padding:8px;color:#4CAF50;font-weight:bold;">6-10x moins</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>CPU</strong></td>
+            <td style="padding:8px;">Video + JS lourd</td>
+            <td style="padding:8px;">Audio seul</td>
+            <td style="padding:8px;color:#4CAF50;font-weight:bold;">5x moins</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>Batterie</strong></td>
+            <td style="padding:8px;">Forte</td>
+            <td style="padding:8px;">Faible</td>
+            <td style="padding:8px;color:#4CAF50;font-weight:bold;">3-5x moins</td>
+        </tr>
+        <tr>
+            <td style="padding:8px;"><strong>Chargement</strong></td>
+            <td style="padding:8px;">2-5 secondes</td>
+            <td style="padding:8px;">&lt;1 seconde</td>
+            <td style="padding:8px;color:#4CAF50;font-weight:bold;">Instantane</td>
+        </tr>
+    </table>
+
+    <h3>Systeme de cache</h3>
+
+    <p>
+        Le cache garde les resultats en memoire pour eviter de re-appeler YouTube.
+        Cela accelere l'application et reduit le risque d'erreur 429 (rate-limit).
+    </p>
+
+    <table style="width:100%;border-collapse:collapse;margin:15px 0;">
+        <tr style="border-bottom:1px solid #333;">
+            <th style="padding:8px;text-align:left;color:#ff4444;">Cache</th>
+            <th style="padding:8px;text-align:left;">Duree</th>
+            <th style="padding:8px;text-align:left;">Contenu</th>
+            <th style="padding:8px;text-align:left;">Effet</th>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>info</strong></td>
+            <td style="padding:8px;">10 min</td>
+            <td style="padding:8px;">Metadonnees video</td>
+            <td style="padding:8px;">Meme video = pas de nouvel appel yt-dlp</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;"><strong>search</strong></td>
+            <td style="padding:8px;">5 min</td>
+            <td style="padding:8px;">Resultats de recherche</td>
+            <td style="padding:8px;">Meme recherche = reponse instantanee</td>
+        </tr>
+        <tr>
+            <td style="padding:8px;"><strong>stream</strong></td>
+            <td style="padding:8px;">4 heures</td>
+            <td style="padding:8px;">URLs directes YouTube</td>
+            <td style="padding:8px;">Re-ecouter = pas de nouvel appel</td>
+        </tr>
+    </table>
+
+    <h3>Gerer le cache</h3>
+    <ol>
+        <li>Aller dans l'onglet <strong>Profil</strong></li>
+        <li>Section <strong>"Cache"</strong> en bas</li>
+        <li>Voir le nombre d'entrees par type et la duree de vie (TTL)</li>
+        <li>Bouton <strong>"Vider le cache"</strong> pour forcer le rechargement depuis YouTube</li>
+        <li>Le cache se vide aussi automatiquement au redemarrage du serveur</li>
+    </ol>
+
+    <h3>Comment yt-dlp accede aux donnees YouTube</h3>
+
+    <p>
+        <strong>Aucune API officielle YouTube n'est utilisee.</strong> Pas de cle API, pas de quota Google.
+        yt-dlp simule un navigateur web pour acceder aux memes donnees qu'un utilisateur normal.
+    </p>
+
+    <table style="width:100%;border-collapse:collapse;margin:15px 0;">
+        <tr style="border-bottom:1px solid #333;">
+            <th style="padding:8px;text-align:left;color:#ff4444;">Fonctionnalite</th>
+            <th style="padding:8px;text-align:left;">Commande yt-dlp</th>
+            <th style="padding:8px;text-align:left;">Donnees</th>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;">Infos video</td>
+            <td style="padding:8px;"><code>--dump-json URL</code></td>
+            <td style="padding:8px;">Titre, artiste, vues, likes, thumbnail, duree</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;">Recherche</td>
+            <td style="padding:8px;"><code>ytsearch20:"query"</code></td>
+            <td style="padding:8px;">Resultats avec titre, URL, thumbnail</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;">Playlists</td>
+            <td style="padding:8px;"><code>--flat-playlist --dump-json URL</code></td>
+            <td style="padding:8px;">Liste des videos d'une playlist</td>
+        </tr>
+        <tr style="border-bottom:1px solid #222;">
+            <td style="padding:8px;">Streaming</td>
+            <td style="padding:8px;"><code>--get-url -f bestaudio[ext=m4a]</code></td>
+            <td style="padding:8px;">URL directe du flux audio</td>
+        </tr>
+        <tr>
+            <td style="padding:8px;">Telechargement</td>
+            <td style="padding:8px;"><code>-x --audio-format mp3</code></td>
+            <td style="padding:8px;">Fichier audio/video converti</td>
+        </tr>
+    </table>
+
+    <div class="warning-box">
+        <strong>Donnees accessibles mais non utilisees :</strong>
+        yt-dlp peut aussi recuperer les commentaires, sous-titres, chapitres, descriptions et
+        listes de videos d'une chaine. Ces fonctionnalites ne sont pas implementees car elles
+        sont lentes et augmentent le risque de blocage par YouTube.
+    </div>
+
+    <div class="error-box">
+        <strong>Limitation :</strong> YouTube peut bloquer temporairement les requetes (erreur 429)
+        si trop d'appels sont faits en peu de temps. Le cache, les delais entre telechargements (3s),
+        et l'absence de retry sur 429 limitent ce risque.
+    </div>
+
+    <h2 id="logs">Logs techniques</h2>
+
+    <p>
+        Un panneau de logs est accessible via le <strong>bouton engrenage</strong> (&#9881;) en bas a droite de l'interface.
+    </p>
+    <ul>
+        <li><strong>Voir</strong> tous les evenements en temps reel (requetes info, telechargements, erreurs)</li>
+        <li><strong>Rafraichir</strong> pour mettre a jour l'affichage</li>
+        <li><strong>Copier les logs</strong> dans le presse-papier pour les partager ou diagnostiquer un probleme</li>
+    </ul>
+    <p>
+        Les logs enregistrent : recuperation des infos video, lancement des telechargements, progression,
+        erreurs (429, bot detection, reseau), et les re-telechargements depuis l'historique.
+    </p>
+
     <h2 id="depannage">Depannage</h2>
 
     <h3>Le programme ne se lance pas</h3>
@@ -1317,8 +1804,8 @@ Body: { "url": "...", "type": "audio", "format": "mp3", "quality": "0", "cover":
 
     <div class="error-box">
         <strong>Erreur : 'python' n'est pas reconnu</strong>
-        Python n'est pas installe. Relancez <code>start.bat</code> ou installez depuis python.org
-        (n'oubliez pas de cocher "Add to PATH").
+        Python n'est pas installe. Relancez <code>start.bat</code> qui le telecharge automatiquement.
+        Si ca echoue, installez depuis python.org (cochez "Add to PATH").
     </div>
 
     <div class="error-box">
@@ -1328,15 +1815,36 @@ Body: { "url": "...", "type": "audio", "format": "mp3", "quality": "0", "cover":
 
     <h3>Le telechargement echoue</h3>
     <div class="error-box">
-        <strong>Erreur : ffmpeg non trouve</strong>
-        Installez ffmpeg via <code>winget install Gyan.FFmpeg</code> puis fermez et rouvrez le terminal.
+        <strong>Erreur 429 - Too Many Requests</strong>
+        YouTube bloque temporairement les requetes. <strong>Attendez 15-30 minutes</strong> avant de reessayer.
+        Le systeme ajoute automatiquement un delai entre chaque telechargement pour limiter ce probleme.
+        En cas de 429, le systeme ne fait pas de retry automatique (ca aggraverait le blocage).
     </div>
 
     <div class="error-box">
-        <strong>Erreur : "Video unavailable" ou "Sign in to confirm"</strong>
-        Certaines videos sont protegees par YouTube. yt-dlp ne peut pas toujours les telecharger.
-        Essayez de mettre a jour yt-dlp via l'interface (onglet systeme) ou manuellement :
+        <strong>Erreur : "Sign in to confirm you're not a bot"</strong>
+        YouTube exige la resolution de challenges JavaScript. Le parametre <code>--remote-components ejs:github</code>
+        est ajoute automatiquement pour resoudre ce probleme. Si ca persiste, mettez a jour yt-dlp :
         <code>python -m pip install -U yt-dlp</code>
+    </div>
+
+    <div class="error-box">
+        <strong>Erreur : ffmpeg non trouve (PC sans winget)</strong>
+        <code>start.bat</code> telecharge automatiquement ffmpeg depuis gyan.dev si winget n'est pas disponible.
+        ffmpeg est installe localement dans le dossier <code>ffmpeg/</code> du projet.
+        Si ca echoue, installez manuellement depuis <a href="https://www.gyan.dev/ffmpeg/builds/" style="color:#ff4444">gyan.dev</a>.
+    </div>
+
+    <div class="error-box">
+        <strong>Le telechargement reussit mais l'interface dit "Erreur"</strong>
+        Ce bug a ete corrige. La detection d'erreur ne confond plus les WARNING YouTube
+        (comme "HTTP Error 429" dans un message WARNING) avec des erreurs fatales de yt-dlp.
+    </div>
+
+    <div class="error-box">
+        <strong>Le lien "Telecharger" ne fonctionne pas</strong>
+        Ce bug a ete corrige. Les noms de fichiers avec espaces, accents et caracteres speciaux
+        sont maintenant encodes correctement dans les URLs (<code>encodeURIComponent</code>).
     </div>
 
     <div class="error-box">
@@ -1352,11 +1860,24 @@ Body: { "url": "...", "type": "audio", "format": "mp3", "quality": "0", "cover":
         (<code>node server.js</code> ou <code>start.bat</code>) avant d'utiliser l'extension.
     </div>
 
+    <h3>Installation sur un PC sans winget</h3>
+    <div class="warning-box">
+        <strong>Tout est automatique</strong>
+        <code>start.bat</code> detecte l'absence de winget et telecharge directement :
+        <ul>
+            <li><strong>Node.js</strong> depuis nodejs.org (installe dans <code>node_local/</code>)</li>
+            <li><strong>Python</strong> embeddable depuis python.org (installe dans <code>python_local/</code>)</li>
+            <li><strong>ffmpeg</strong> depuis gyan.dev (installe dans <code>ffmpeg/</code>)</li>
+            <li><strong>yt-dlp</strong> via pip, ou en standalone (<code>yt-dlp.exe</code>) si pip echoue</li>
+        </ul>
+        Aucune etape ne bloque l'avancement sauf si Node.js est introuvable (obligatoire pour le serveur).
+    </div>
+
     <h3>Commandes utiles pour diagnostiquer</h3>
     <pre><code># Verifier que tout est installe :
 node --version          &larr; doit afficher v20+
 python --version        &larr; doit afficher 3.12+
-python -m yt_dlp --version   &larr; doit afficher 2024.x.x+
+python -m yt_dlp --version   &larr; doit afficher 2026.x.x+
 ffmpeg -version         &larr; doit afficher la version
 
 # Mettre a jour yt-dlp :
@@ -1369,7 +1890,7 @@ npm install</code></pre>
     <br><br>
     <hr style="border-color: #333;">
     <p style="text-align: center; color: #555; margin-top: 20px;">
-        YouTube Downloader Node - Documentation technique v1.0
+        YouTube Downloader Node - Documentation technique v2.0
     </p>
 
 </div>

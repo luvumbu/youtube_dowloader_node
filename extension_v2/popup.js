@@ -84,6 +84,7 @@ function showStatus(msg, cls) {
   status.className = 'status ' + cls;
 }
 
+// ========== TELECHARGEMENT ==========
 async function sendDownload(url, action) {
   const type = document.querySelector('input[name="type"]:checked').value;
   const format = formatSel.value;
@@ -145,20 +146,25 @@ async function pollAndAdd(jobId, info, type, format, cover) {
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'action=add&title=' + encodeURIComponent(info.title) + '&status=success'
             + '&format=' + format + '&type=' + type + '&url=' + encodeURIComponent(currentUrl)
+            + '&thumbnail=' + encodeURIComponent(info.thumbnail || '')
+            + '&channel=' + encodeURIComponent(info.channel || '')
         });
-      } else if (data.status === 'error') { clearInterval(poll); }
+        showStatus('Termine : ' + info.title, 'ok');
+      } else if (data.status === 'error') {
+        clearInterval(poll);
+        showStatus('Echec : ' + (data.message || ''), 'err');
+      }
     } catch (e) { clearInterval(poll); }
   }, 2000);
 }
 
-// Charger les playlists de Mon Flow
+// ========== MON FLOW ==========
 async function loadFlowPlaylists() {
   try {
     const resp = await fetch(API + '/flow?action=list');
     const data = await resp.json();
     if (!data.success) return;
     const playlists = data.playlists || [];
-    // Extraire aussi les playlists depuis les tracks
     const trackPls = [...new Set((data.tracks || []).map(t => t.playlist).filter(Boolean))];
     const allPls = [...new Set([...playlists.map(p => p.name), ...trackPls])];
 
@@ -233,7 +239,7 @@ async function addToFlow(url) {
     } else {
       const plLabel = playlist ? ' (' + playlist + ')' : '';
       showStatus('Ajoute a Mon Flow' + plLabel + ' : ' + info.title, 'ok');
-      btnFlow.textContent = 'Ajoute a Mon Flow !';
+      btnFlow.textContent = 'Ajoute !';
     }
   } catch (err) {
     showStatus('Erreur: ' + err.message, 'err');
@@ -245,6 +251,7 @@ async function addToFlow(url) {
   }
 }
 
+// ========== EVENTS ==========
 btnDl.addEventListener('click', () => sendDownload(currentUrl, 'download'));
 btnQueue.addEventListener('click', () => sendDownload(currentUrl, 'queue'));
 btnFlow.addEventListener('click', () => addToFlow(currentUrl));

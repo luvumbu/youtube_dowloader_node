@@ -42,7 +42,13 @@ router.all('/', async (req, res) => {
             });
             saveLib(lib);
 
-            const items = lib.items;
+            const items = lib.items.map(item => {
+                try {
+                    const filePath = path.join(config.ROOT_DIR, item.file);
+                    item.size = fs.statSync(filePath).size;
+                } catch (e) { item.size = 0; }
+                return item;
+            });
             res.json({
                 success: true,
                 folders: lib.folders,

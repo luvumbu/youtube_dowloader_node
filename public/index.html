@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>YouTube Downloader</title>
+<link rel="icon" href="youtube.ico" type="image/x-icon">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -23,6 +24,7 @@
         <div class="tab active" onclick="switchTab('download')">Telecharger</div>
         <div class="tab" onclick="switchTab('search')">Recherche</div>
         <div class="tab" onclick="switchTab('library')">Bibliotheque</div>
+        <div class="tab" onclick="switchTab('flow')" ondragover="event.preventDefault(); this.classList.add('tab-dragover')" ondragleave="this.classList.remove('tab-dragover')" ondrop="this.classList.remove('tab-dragover'); flowDropOnTab(event)">Mon Flow</div>
         <div class="tab" onclick="switchTab('profile')">Profil</div>
     </div>
 
@@ -202,11 +204,96 @@
                     </div>
                     <button class="btn-save-prefs" onclick="savePrefs()">Sauvegarder les preferences</button>
                 </div>
+                <div class="profile-card" style="margin-top:15px;">
+                    <h2>Cache</h2>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Le cache reduit les appels a YouTube en gardant les resultats en memoire.</p>
+                    <div id="cacheStats" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
+                    <button onclick="clearCache()" style="background:var(--error);color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;">Vider le cache</button>
+                    <button onclick="loadCacheStats()" style="background:var(--border);color:var(--text-faint);border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;margin-left:6px;">Rafraichir</button>
+                </div>
                 <div style="text-align:center;">
                     <button class="btn-logout" onclick="logoutUser()">Se deconnecter</button>
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- TAB LIBRARY -->
+    <!-- TAB MON FLOW -->
+    <div class="tab-content" id="tab-flow">
+        <div id="flowPlayer" style="display:none;padding:14px;margin-bottom:14px;background:var(--bg-hover);border-radius:12px;border:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <img id="flowThumb" style="width:56px;height:42px;object-fit:cover;border-radius:6px;">
+                <div style="flex:1;min-width:0;">
+                    <div id="flowTitle" style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+                    <div id="flowMeta" style="font-size:12px;color:var(--text-muted);"></div>
+                </div>
+                <button onclick="flowPrev()" class="flow-ctrl-btn" title="Precedent">&#9664;&#9664;</button>
+                <button onclick="flowNext()" class="flow-ctrl-btn" title="Suivant">&#9654;&#9654;</button>
+                <button onclick="flowToggleShuffle()" class="flow-ctrl-btn" id="flowShuffleBtn" title="Aleatoire">&#128256;</button>
+                <button onclick="flowStop()" class="flow-ctrl-btn flow-ctrl-stop" title="Arreter">&#9632;</button>
+            </div>
+            <audio id="flowAudio" controls style="width:100%;height:36px;"></audio>
+            <video id="flowVideo" controls style="width:100%;max-height:300px;border-radius:6px;margin-top:8px;display:none;"></video>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="flowSearch" placeholder="Rechercher dans Mon Flow..." oninput="filterFlow()" style="flex:1;min-width:150px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;">
+            <select id="flowDlFormat" onchange="renderFlow()" class="sort-select">
+                <optgroup label="Audio">
+                    <option value="audio:mp3" selected>MP3</option>
+                    <option value="audio:flac">FLAC</option>
+                    <option value="audio:wav">WAV</option>
+                    <option value="audio:aac">AAC</option>
+                    <option value="audio:ogg">OGG</option>
+                </optgroup>
+                <optgroup label="Video">
+                    <option value="video:mp4">MP4</option>
+                    <option value="video:mkv">MKV</option>
+                    <option value="video:webm">WEBM</option>
+                </optgroup>
+            </select>
+            <select id="flowSortBy" onchange="sortFlow()" class="sort-select">
+                <option value="added-desc">Ajout (recent)</option>
+                <option value="added-asc">Ajout (ancien)</option>
+                <option value="title-asc">Titre A-Z</option>
+                <option value="title-desc">Titre Z-A</option>
+                <option value="channel-asc">Artiste A-Z</option>
+                <option value="plays-desc">Plus ecoutes</option>
+                <option value="plays-asc">Moins ecoutes</option>
+                <option value="recent-play">Ecoute recemment</option>
+                <option value="type-audio">Audio d'abord</option>
+                <option value="type-video">Video d'abord</option>
+            </select>
+            <button class="btn-small" style="background:#4CAF50;color:#fff;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowAddFromHistory()">+ Depuis l'historique</button>
+            <button class="btn-small" style="background:#FF9800;color:#fff;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="document.getElementById('flowImportFile').click()">Importer</button>
+            <input type="file" id="flowImportFile" accept=".json" style="display:none;" onchange="flowImport(event)">
+            <button class="btn-small" style="background:#2196F3;color:#fff;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowExport()">Exporter</button>
+        </div>
+
+        <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-small" style="background:var(--primary);color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowShowCreatePlaylist()">+ Nouvelle playlist</button>
+            <button class="btn-small" style="background:var(--border);color:var(--text-faint);border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowAddByUrl()">+ Ajouter par URL</button>
+            <button class="btn-small" style="background:#9C27B0;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowToggleSearch()">Rechercher sur YouTube</button>
+        </div>
+        <div id="flowYtSearch" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg-hover);border-radius:10px;border:1px solid var(--border);">
+            <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <input type="text" id="flowYtQuery" placeholder="Rechercher un titre, artiste..." style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;" onkeydown="if(event.key==='Enter') flowYtDoSearch()">
+                <button onclick="flowYtDoSearch()" style="background:#9C27B0;color:#fff;border:none;padding:6px 16px;border-radius:8px;cursor:pointer;font-size:13px;">Rechercher</button>
+            </div>
+            <div id="flowYtResults"></div>
+        </div>
+        <div id="flowCreatePl" style="display:none;margin-bottom:10px;display:none;gap:6px;align-items:center;">
+            <input type="text" id="flowNewPlName" placeholder="Nom de la playlist..." style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;">
+            <button onclick="flowCreatePlaylist()" style="background:var(--primary);color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;">Creer</button>
+            <button onclick="document.getElementById('flowCreatePl').style.display='none'" style="background:var(--border);color:var(--text-faint);border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;">Annuler</button>
+        </div>
+        <div id="flowPlaylists" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+            <span class="flow-pl-chip active" onclick="flowFilterPlaylist('', this)">Tout</span>
+        </div>
+
+        <div id="flowTrackCount" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;"></div>
+        <div id="flowList"></div>
     </div>
 
     <!-- TAB LIBRARY -->
@@ -222,19 +309,25 @@
             <span class="ub-version" id="ytdlpVersion">yt-dlp : chargement...</span>
         </div>
         <div class="lib-search">
-            <input type="text" id="libSearch" placeholder="Rechercher dans la bibliotheque..." oninput="filterLibrary()">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                <input type="text" id="libSearch" placeholder="Rechercher dans la bibliotheque..." oninput="filterLibrary()" style="flex:1;min-width:150px;">
+                <select id="libSortBy" onchange="sortLibrary()" class="sort-select">
+                    <option value="date-desc">Date (recent)</option>
+                    <option value="date-asc">Date (ancien)</option>
+                    <option value="title-asc">Titre A-Z</option>
+                    <option value="title-desc">Titre Z-A</option>
+                    <option value="type-audio">Audio d'abord</option>
+                    <option value="type-video">Video d'abord</option>
+                    <option value="size-desc">Taille (gros)</option>
+                    <option value="size-asc">Taille (petit)</option>
+                </select>
+            </div>
             <div class="lib-filter-chips" id="libFilterChips"></div>
         </div>
         <div class="lib-header">
             <div class="lib-actions">
                 <button class="btn-small btn-create" onclick="showCreateFolder()">+ Nouveau dossier</button>
                 <button class="btn-small" style="background:var(--border);color:var(--text-faint)" onclick="toggleHistory()">Historique</button>
-            </div>
-        </div>
-        <div id="historyPanel" style="display:none;">
-            <div class="profile-card">
-                <h2>Historique des telechargements</h2>
-                <div class="history-list" id="historyList"></div>
             </div>
         </div>
         <div class="folders" id="foldersBar">
@@ -251,6 +344,71 @@
         </div>
         <div class="items-grid" id="itemsGrid"></div>
         <div class="empty-lib" id="emptyLib">Aucun telechargement pour le moment.</div>
+        <div id="historyPanel" style="display:none;">
+            <div class="profile-card" style="margin-top:20px;">
+                <h2>Historique des telechargements</h2>
+                <div id="historyActions" style="display:none;padding:8px 0;margin-bottom:8px;border-bottom:1px solid var(--border);">
+                    <button class="btn-small btn-create" onclick="historySelectAll()" id="btnHistSelectAll">Tout cocher</button>
+                    <button class="btn-small btn-create" onclick="historyDeselectAll()" id="btnHistDeselectAll" style="display:none;">Tout decocher</button>
+                    <select id="redownloadFormat" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:12px;">
+                        <optgroup label="Audio">
+                            <option value="audio:mp3">MP3</option>
+                            <option value="audio:flac">FLAC</option>
+                            <option value="audio:wav">WAV</option>
+                            <option value="audio:aac">AAC</option>
+                            <option value="audio:ogg">OGG</option>
+                        </optgroup>
+                        <optgroup label="Video">
+                            <option value="video:mp4">MP4</option>
+                            <option value="video:mkv">MKV</option>
+                            <option value="video:webm">WEBM</option>
+                        </optgroup>
+                        <option value="original">Format d'origine</option>
+                    </select>
+                    <button class="btn-small" style="background:#4CAF50;color:#fff;" onclick="historyRedownload()">Re-telecharger la selection</button>
+                    <button class="btn-small" style="background:#2196F3;color:#fff;" onclick="historyExport()">Exporter la liste</button>
+                    <button class="btn-small" style="background:#FF9800;color:#fff;" onclick="document.getElementById('historyImportFile').click()">Importer une liste</button>
+                    <input type="file" id="historyImportFile" accept=".json" style="display:none;" onchange="historyImport(event)">
+                    <span id="historySelCount" style="margin-left:10px;color:var(--text-muted);font-size:13px;">0 selectionne(s)</span>
+                </div>
+                <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
+                    <input type="text" id="historySearch" placeholder="Rechercher..." oninput="filterHistorySearch()" style="flex:1;min-width:150px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;">
+                    <select id="historySortBy" onchange="sortHistory()" class="sort-select">
+                        <option value="date-desc">Date (recent)</option>
+                        <option value="date-asc">Date (ancien)</option>
+                        <option value="title-asc">Titre A-Z</option>
+                        <option value="title-desc">Titre Z-A</option>
+                        <option value="type-audio">Audio d'abord</option>
+                        <option value="type-video">Video d'abord</option>
+                    </select>
+                </div>
+                <div style="display:flex;gap:6px;margin-bottom:6px;">
+                    <span class="hist-filter active" onclick="filterHistoryPresence('all', this)">Tous</span>
+                    <span class="hist-filter" onclick="filterHistoryPresence('present', this)">Presents</span>
+                    <span class="hist-filter" onclick="filterHistoryPresence('absent', this)">Absents</span>
+                </div>
+                <div id="historyFilters" style="display:none;padding:4px 0 8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+                <div id="redownloadQueue" style="display:none;margin-bottom:16px;">
+                    <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                        Re-telechargement <span class="queue-count" id="redownloadCount">0/0</span>
+                    </h3>
+                    <div id="redownloadList"></div>
+                </div>
+                <div id="streamPlayer" style="display:none;padding:12px;margin-bottom:12px;background:var(--bg-hover);border-radius:10px;border:1px solid var(--border);">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                        <img id="streamThumb" style="width:48px;height:36px;object-fit:cover;border-radius:4px;">
+                        <div style="flex:1;min-width:0;">
+                            <div id="streamTitle" style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+                            <div id="streamMeta" style="font-size:11px;color:var(--text-muted);"></div>
+                        </div>
+                        <button onclick="stopStream()" style="background:none;border:none;color:var(--error);font-size:18px;cursor:pointer;" title="Fermer">&#10005;</button>
+                    </div>
+                    <audio id="streamAudio" controls style="width:100%;height:36px;"></audio>
+                    <video id="streamVideo" controls style="width:100%;max-height:300px;border-radius:6px;margin-top:8px;display:none;"></video>
+                </div>
+                <div class="history-list" id="historyList"></div>
+            </div>
+        </div>
     </div>
 
 </div>
@@ -314,6 +472,7 @@
 <div class="video-player-overlay" id="videoOverlay">
     <button class="vp-close" onclick="closeVideoPlayer()">&#10005;</button>
     <video id="videoEl" controls></video>
+    <iframe id="videoIframe" style="display:none;width:100%;max-width:900px;height:500px;border:none;border-radius:10px;" allow="autoplay; encrypted-media" allowfullscreen></iframe>
     <div class="vp-title" id="videoPlayerTitle"></div>
 </div>
 

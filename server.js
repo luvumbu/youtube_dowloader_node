@@ -26,7 +26,8 @@ const defaults = {
     [config.PROFILES_FILE]: JSON.stringify([]),
     [config.HISTORY_FILE]: JSON.stringify([]),
     [config.QUEUE_FILE]: JSON.stringify([]),
-    [config.NOTIFICATIONS_FILE]: JSON.stringify([])
+    [config.NOTIFICATIONS_FILE]: JSON.stringify([]),
+    [path.join(config.DATA_DIR, 'flow.json')]: JSON.stringify({ tracks: [], playlists: [] })
 };
 for (const [file, content] of Object.entries(defaults)) {
     if (!fs.existsSync(file)) fs.writeFileSync(file, content);
@@ -56,6 +57,8 @@ loadRoute('/api/playlist', './api/playlist');
 loadRoute('/api/history', './api/history');
 loadRoute('/api/system', './api/system');
 loadRoute('/api/convert', './api/convert');
+loadRoute('/api/stream', './api/stream');
+loadRoute('/api/flow', './api/flow');
 
 // Page principale
 app.get('/', (req, res) => {
