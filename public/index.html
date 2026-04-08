@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>YouTube Downloader</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="theme-toggle" id="themeIcon" onclick="toggleTheme()" title="Changer le theme">&#9728;</div>
+<div class="notif-toggle" id="notifToggle" onclick="toggleNotifications()" title="Notifications activees">🔔</div>
+
+<div class="app">
+
+    <div class="welcome-bar" id="welcomeBar" style="display:none;">
+        <div class="user-chip">
+            <span class="user-dot"></span>
+            <span id="welcomeName"></span>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('download')">Telecharger</div>
+        <div class="tab" onclick="switchTab('search')">Recherche</div>
+        <div class="tab" onclick="switchTab('library')">Bibliotheque</div>
+        <div class="tab" onclick="switchTab('profile')">Profil</div>
+    </div>
+
+    <!-- TAB DOWNLOAD -->
+    <div class="tab-content active" id="tab-download">
+        <div class="dl-container">
+            <h1>YouTube Downloader</h1>
+            <p class="subtitle">Colle une URL YouTube pour telecharger en audio ou video</p>
+
+            <form id="dlForm">
+                <input type="text" id="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+
+                <div class="dl-options-header" onclick="toggleDlOptions()">
+                    <span class="dl-options-burger" id="dlBurger">&#9776;</span>
+                    <span class="dl-options-summary" id="dlSummary">MP3 — Meilleure qualite</span>
+                    <span class="dl-options-arrow" id="dlArrow">&#9660;</span>
+                </div>
+
+                <div class="dl-options-panel" id="dlOptionsPanel">
+                    <div class="type-toggle">
+                        <input type="radio" name="type" id="typeAudio" value="audio" checked>
+                        <label for="typeAudio">Audio</label>
+                        <input type="radio" name="type" id="typeVideo" value="video">
+                        <label for="typeVideo">Video</label>
+                    </div>
+
+                    <div class="options-row">
+                        <select id="format"></select>
+                        <select id="quality"></select>
+                    </div>
+
+                    <div class="options-row">
+                        <select id="targetFolder">
+                            <option value="">Aucun dossier</option>
+                        </select>
+                    </div>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="saveCover"> Telecharger aussi la couverture (image)
+                    </label>
+                </div>
+
+                <button type="submit" id="btn">Telecharger</button>
+            </form>
+
+            <div class="video-card" id="videoCard">
+                <img id="thumb" src="" alt="">
+                <div class="video-info">
+                    <div class="title" id="videoTitle"></div>
+                    <div class="meta" id="videoMeta"></div>
+                </div>
+            </div>
+
+            <div class="progress-zone" id="progressZone">
+                <div class="progress-bar-bg">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <div class="progress-text" id="progressText">Demarrage...</div>
+                <button class="btn-cancel" id="btnCancel" onclick="cancelDownload()" style="display:none;">Annuler</button>
+            </div>
+
+            <div id="result"></div>
+
+            <div class="queue-section" id="queueSection" style="display:none;">
+                <h3>File d'attente <span class="queue-count" id="queueCount">0</span></h3>
+                <div id="queueList"></div>
+            </div>
+
+            <button class="btn-add-queue" onclick="addToQueue()">+ Ajouter a la file d'attente</button>
+        </div>
+    </div>
+
+    <!-- TAB SEARCH -->
+    <div class="tab-content" id="tab-search">
+        <div class="search-container">
+            <h1>Recherche YouTube</h1>
+            <p class="subtitle">Cherche une video directement sans quitter l'application</p>
+            <div class="search-box">
+                <input type="search" id="searchInput" placeholder="Rechercher sur YouTube...">
+                <button onclick="searchYouTube()">Rechercher</button>
+            </div>
+
+            <div class="sq-options">
+                <select id="sqType" onchange="sqUpdateFormats()">
+                    <option value="audio">Audio</option>
+                    <option value="video">Video</option>
+                </select>
+                <select id="sqFormat"></select>
+                <select id="sqQuality"></select>
+            </div>
+
+            <div class="sq-panel" id="sqPanel" style="display:none;">
+                <div class="sq-header">
+                    <h3>File d'attente <span class="sq-count" id="sqCount">0</span></h3>
+                    <div class="sq-header-btns">
+                        <button class="sq-btn-log" onclick="document.getElementById('sqLogPanel').classList.toggle('active')">&#128276; <span id="sqLogBadge" class="sq-log-badge"></span></button>
+                        <button class="sq-btn-done" onclick="sqClearDone()">&#10003; Termines</button>
+                        <button class="sq-btn-danger" onclick="sqClearAll()">&#10005; Tout vider</button>
+                    </div>
+                </div>
+                <div class="sq-progress-total" id="sqProgressTotal" style="display:none;">
+                    <div class="sq-progress-label"><span id="sqProgressLabel">0 / 0</span></div>
+                    <div class="sq-bar-bg"><div class="sq-bar-fill" id="sqBarFill"></div></div>
+                </div>
+                <div class="sq-list" id="sqList"></div>
+            </div>
+
+            <div id="searchResults"></div>
+        </div>
+    </div>
+
+    <!-- TAB PROFILE -->
+    <div class="tab-content" id="tab-profile">
+        <div class="profile-container">
+            <div id="loginView">
+                <div class="login-box">
+                    <h2>Mon Profil</h2>
+                    <p>Choisis ton profil ou cree-en un nouveau</p>
+                    <div id="profilesList" class="profiles-list"></div>
+                    <div style="margin-top:15px; border-top:1px solid #333; padding-top:15px;">
+                        <p style="color:#666; font-size:13px; margin-bottom:10px;">Nouveau profil</p>
+                        <input type="text" id="loginName" placeholder="Ton pseudo...">
+                        <button onclick="loginUser()">Creer</button>
+                    </div>
+                </div>
+            </div>
+            <div id="profileView" style="display:none;">
+                <div class="profile-card">
+                    <div class="profile-avatar" id="profileAvatar"></div>
+                    <div class="profile-name" id="profileName"></div>
+                    <div class="profile-since" id="profileSince"></div>
+                </div>
+                <div class="profile-card">
+                    <h2>Preferences par defaut</h2>
+                    <div class="pref-section">
+                        <label>Type prefere</label>
+                        <div class="type-toggle">
+                            <input type="radio" name="prefType" id="prefAudio" value="audio" checked>
+                            <label for="prefAudio">Audio</label>
+                            <input type="radio" name="prefType" id="prefVideo" value="video">
+                            <label for="prefVideo">Video</label>
+                        </div>
+                    </div>
+                    <div class="pref-section">
+                        <label>Format audio par defaut</label>
+                        <div class="pref-row">
+                            <select id="prefFormatAudio">
+                                <option value="mp3">MP3</option><option value="flac">FLAC</option>
+                                <option value="wav">WAV</option><option value="aac">AAC</option>
+                                <option value="ogg">OGG</option>
+                            </select>
+                            <select id="prefQualityAudio">
+                                <option value="0">Meilleure qualite</option>
+                                <option value="5">Qualite moyenne</option>
+                                <option value="9">Qualite basse</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="pref-section">
+                        <label>Format video par defaut</label>
+                        <div class="pref-row">
+                            <select id="prefFormatVideo">
+                                <option value="mp4">MP4</option><option value="mkv">MKV</option>
+                                <option value="webm">WEBM</option>
+                            </select>
+                            <select id="prefQualityVideo">
+                                <option value="best">Meilleure qualite</option>
+                                <option value="1080">1080p</option><option value="720">720p</option>
+                                <option value="480">480p</option><option value="360">360p</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="pref-section">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="prefCover"> Toujours telecharger la couverture
+                        </label>
+                    </div>
+                    <button class="btn-save-prefs" onclick="savePrefs()">Sauvegarder les preferences</button>
+                </div>
+                <div style="text-align:center;">
+                    <button class="btn-logout" onclick="logoutUser()">Se deconnecter</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB LIBRARY -->
+    <div class="tab-content" id="tab-library">
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card"><div class="sc-num" id="statTotal">0</div><div class="sc-label">Total</div></div>
+            <div class="stat-card"><div class="sc-num" id="statAudio">0</div><div class="sc-label">Audio</div></div>
+            <div class="stat-card"><div class="sc-num" id="statVideo">0</div><div class="sc-label">Video</div></div>
+            <div class="stat-card"><div class="sc-num" id="statDisk">-</div><div class="sc-label">Espace disque</div></div>
+            <div class="stat-card"><div class="sc-num" id="statDuration">-</div><div class="sc-label">Duree totale</div></div>
+        </div>
+        <div class="update-bar" id="updateBar">
+            <span class="ub-version" id="ytdlpVersion">yt-dlp : chargement...</span>
+        </div>
+        <div class="lib-search">
+            <input type="text" id="libSearch" placeholder="Rechercher dans la bibliotheque..." oninput="filterLibrary()">
+            <div class="lib-filter-chips" id="libFilterChips"></div>
+        </div>
+        <div class="lib-header">
+            <div class="lib-actions">
+                <button class="btn-small btn-create" onclick="showCreateFolder()">+ Nouveau dossier</button>
+                <button class="btn-small" style="background:var(--border);color:var(--text-faint)" onclick="toggleHistory()">Historique</button>
+            </div>
+        </div>
+        <div id="historyPanel" style="display:none;">
+            <div class="profile-card">
+                <h2>Historique des telechargements</h2>
+                <div class="history-list" id="historyList"></div>
+            </div>
+        </div>
+        <div class="folders" id="foldersBar">
+            <div class="folder-chip active" onclick="filterFolder('')">Tout</div>
+        </div>
+        <div id="bigActionBtns" style="display:none;">
+            <span class="select-count" id="selectCount">0 selectionne(s)</span>
+            <div class="big-actions-row">
+                <button class="big-select-all" onclick="selectAll()">&#9745; Tout selectionner</button>
+                <button class="big-deselect" onclick="deselectAll()" style="display:none;" id="btnDeselect">&#9744; Tout deselectionner</button>
+                <button class="big-play" onclick="playSelected()" style="display:none;" id="btnPlaySel">&#9654; Lire la selection</button>
+                <button class="big-delete" onclick="deleteSelected()" style="display:none;" id="btnDeleteSel">&#10005; Supprimer la selection</button>
+            </div>
+        </div>
+        <div class="items-grid" id="itemsGrid"></div>
+        <div class="empty-lib" id="emptyLib">Aucun telechargement pour le moment.</div>
+    </div>
+
+</div>
+
+<!-- Player bar fixe -->
+<div class="player-bar" id="playerBar">
+    <div class="player-seek" id="playerSeek" onclick="seekPlayer(event)">
+        <div class="player-seek-fill" id="playerSeekFill"></div>
+    </div>
+    <div class="player-main">
+        <img class="player-thumb" id="playerThumb" src="" alt="">
+        <div class="player-info">
+            <div class="p-title" id="playerTitle">-</div>
+            <div class="p-artist" id="playerArtist">-</div>
+            <div class="p-next" id="playerNext" style="display:none;"><img class="p-next-thumb" id="playerNextThumb" src=""> Suivante : <span id="playerNextTitle"></span></div>
+        </div>
+        <div class="player-time" id="playerTime">0:00 / 0:00</div>
+        <div class="player-controls">
+            <button onclick="playerSetMode('shuffle')" id="btnShuffle" title="Aleatoire">&#9776;</button>
+            <button onclick="playerPrev()" title="Precedent">&#9198;</button>
+            <button class="btn-play" onclick="playerToggle()" id="btnPlayPause" title="Lecture">&#9654;</button>
+            <button onclick="playerNext()" title="Suivant">&#9197;</button>
+            <button onclick="playerSetMode('loop')" id="btnLoop" title="Boucle">&#8634;</button>
+            <button onclick="playerSetMode('loopOne')" id="btnLoopOne" title="Boucle 1">&#8635;</button>
+        </div>
+        <div class="player-volume">
+            <button onclick="playerMute()">&#128266;</button>
+            <input type="range" min="0" max="100" value="80" oninput="playerSetVolume(this.value)" id="volumeSlider">
+        </div>
+        <button class="player-queue-btn" onclick="togglePlayerQueue()" title="File de lecture">&#9776;</button>
+        <button class="player-close" onclick="playerClose()" title="Fermer">&#10005;</button>
+    </div>
+    <div class="player-queue" id="playerQueue" style="display:none;">
+        <div class="pq-header"><span>File de lecture</span><span class="pq-count" id="pqCount"></span></div>
+        <div class="pq-list" id="pqList"></div>
+    </div>
+</div>
+
+<div class="sq-statusbar" id="sqStatusbar" style="display:none;" onclick="switchTab('search')">
+    <div class="sq-statusbar-icon">&#11015;</div>
+    <div class="sq-statusbar-info">
+        <div class="sq-statusbar-title" id="sqStatusTitle">Telechargement en cours...</div>
+        <div class="sq-statusbar-detail" id="sqStatusDetail"></div>
+    </div>
+    <div class="sq-statusbar-progress"><div class="sq-statusbar-bar" id="sqStatusBar"></div></div>
+</div>
+
+<div class="sq-log-panel" id="sqLogPanel">
+    <div class="sq-log-header">
+        <span>Notifications</span>
+        <div>
+            <button class="sq-btn-clear" onclick="sqClearLog()">Vider</button>
+            <button class="sq-btn-clear" onclick="document.getElementById('sqLogPanel').classList.remove('active')">&times;</button>
+        </div>
+    </div>
+    <div class="sq-log-body" id="sqLogBody"></div>
+</div>
+
+<audio id="audioEl"></audio>
+
+<div class="video-player-overlay" id="videoOverlay">
+    <button class="vp-close" onclick="closeVideoPlayer()">&#10005;</button>
+    <video id="videoEl" controls></video>
+    <div class="vp-title" id="videoPlayerTitle"></div>
+</div>
+
+<div class="modal-overlay" id="modalFolder">
+    <div class="modal">
+        <h3>Nouveau dossier</h3>
+        <input type="text" id="folderName" placeholder="Nom du dossier...">
+        <div class="modal-btns">
+            <button class="btn-cancel" onclick="closeModal('modalFolder')">Annuler</button>
+            <button onclick="createFolder()">Creer</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modalConfirm">
+    <div class="modal">
+        <h3 id="confirmTitle">Confirmation</h3>
+        <p id="confirmMessage" style="color:var(--text-secondary);font-size:14px;margin-bottom:20px;"></p>
+        <div class="modal-btns">
+            <button class="btn-cancel" onclick="closeModal('modalConfirm')">Annuler</button>
+            <button id="confirmBtn" style="background:var(--error);">Supprimer</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modalToast">
+    <div class="modal" style="text-align:center;padding:24px;">
+        <p id="toastMessage" style="font-size:15px;"></p>
+        <button style="margin-top:15px;width:100%;" onclick="closeModal('modalToast')">OK</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modalMove">
+    <div class="modal">
+        <h3>Deplacer vers</h3>
+        <select id="moveTarget"></select>
+        <div class="modal-btns">
+            <button class="btn-cancel" onclick="closeModal('modalMove')">Annuler</button>
+            <button onclick="confirmMove()">Deplacer</button>
+        </div>
+    </div>
+</div>
+
+<div id="logsPanel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a1a2e;border-top:2px solid #e94560;z-index:9999;max-height:300px;font-family:monospace;font-size:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#16213e;">
+        <span style="color:#e94560;font-weight:bold;">Logs techniques</span>
+        <div>
+            <button onclick="refreshLogsPanel()" style="background:#2196F3;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;margin-right:4px;">Rafraichir</button>
+            <button onclick="copyLogs()" style="background:#4CAF50;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;margin-right:4px;">Copier les logs</button>
+            <button onclick="document.getElementById('logsPanel').style.display='none'" style="background:#e94560;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;">Fermer</button>
+        </div>
+    </div>
+    <pre id="logsContent" style="color:#a8b2d1;padding:8px 12px;margin:0;overflow:auto;max-height:250px;white-space:pre-wrap;"></pre>
+</div>
+
+<button onclick="showLogsPanel()" style="position:fixed;bottom:10px;right:10px;background:#16213e;color:#e94560;border:1px solid #e94560;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:9998;" title="Logs techniques">&#9881;</button>
+
+<script src="js/app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,663 @@
+/* ========== BARRE FLOTTANTE (2 boutons) ========== */
+#ytdl-bar {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    gap: 6px;
+    z-index: 99998;
+    align-items: center;
+}
+
+.ytdl-fab {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 50%;
+    color: #f1f1f1;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+    box-shadow: none;
+    background: #272727;
+}
+
+/* Bouton DL */
+.ytdl-fab-dl {
+    background: #272727;
+    min-width: 36px;
+    padding: 0 12px;
+    border-radius: 18px;
+    font-weight: 500;
+    font-size: 13px;
+    font-family: 'Roboto', sans-serif;
+    gap: 4px;
+    color: #f1f1f1;
+    box-shadow: none;
+    height: 36px;
+}
+.ytdl-fab-dl:hover { background: #3d3d3d; transform: none; box-shadow: none; }
+.ytdl-fab-dl:disabled { opacity: 0.5; cursor: wait; transform: none; }
+.ytdl-fab-dl.ytdl-exists { background: #272727; color: #3ea6ff; }
+.ytdl-fab-dl.ytdl-exists:hover { background: #3d3d3d; }
+.ytdl-fab-dl.ytdl-downloaded { background: #272727; color: #4caf50; }
+.ytdl-fab-dl.ytdl-downloaded:hover { background: #3d3d3d; }
+.ytdl-fab-dl.ytdl-progress { background: #272727; color: #3ea6ff; min-width: 48px; box-shadow: none; }
+.ytdl-fab-dl.ytdl-error { background: #272727; color: #ff4444; }
+
+/* Bouton menu burger */
+.ytdl-fab-menu { background: #272727; color: #aaa; }
+.ytdl-fab-menu:hover { background: #3d3d3d; color: #f1f1f1; transform: none; }
+
+/* Bouton notifications */
+.ytdl-fab-notif {
+    background: #272727;
+    color: #aaa;
+    font-size: 16px;
+    width: 36px;
+    height: 36px;
+}
+.ytdl-fab-notif:hover { background: #3d3d3d; color: #f1f1f1; transform: none; }
+.ytdl-fab-notif.off { opacity: 0.4; }
+.ytdl-fab-notif.off:hover { opacity: 0.7; }
+
+/* ========== BANDEAU PLAYLIST ========== */
+#ytdl-playlist-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: #0f0f0f;
+    border-bottom: 1px solid #3d3d3d;
+    z-index: 99999;
+    font-family: 'Roboto', sans-serif;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.5);
+    animation: ytdlSlideDown 0.2s ease;
+}
+
+@keyframes ytdlSlideDown {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+
+/* Barre compacte (toujours visible) */
+#ytdl-playlist-banner .ytdl-pb-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+#ytdl-playlist-banner .ytdl-pb-top:hover { background: rgba(255,255,255,0.05); }
+
+#ytdl-playlist-banner .ytdl-pb-left {
+    display: flex; align-items: center; gap: 8px; color: #f1f1f1;
+}
+#ytdl-playlist-banner .ytdl-pb-icon { display: flex; color: #ff0000; }
+#ytdl-playlist-banner .ytdl-pb-text { font-size: 13px; color: #f1f1f1; font-weight: 400; }
+#ytdl-playlist-banner .ytdl-pb-text strong { color: #f1f1f1; font-weight: 500; }
+
+#ytdl-playlist-banner .ytdl-pb-right { display: flex; align-items: center; gap: 8px; }
+
+/* Burger arrow */
+#ytdl-playlist-banner .ytdl-pb-arrow {
+    color: #aaa; font-size: 13px; transition: transform 0.2s ease; padding: 0 4px;
+}
+#ytdl-playlist-banner.open .ytdl-pb-arrow { transform: rotate(180deg); }
+
+/* Bouton DL */
+#ytdl-playlist-banner .ytdl-pb-dl {
+    padding: 6px 16px;
+    background: #ff0000;
+    color: #fff;
+    border: none;
+    border-radius: 18px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    font-family: 'Roboto', sans-serif;
+    min-width: 120px;
+    text-align: center;
+    box-shadow: none;
+    letter-spacing: 0;
+}
+#ytdl-playlist-banner .ytdl-pb-dl:hover {
+    background: #cc0000;
+    transform: none;
+    box-shadow: none;
+}
+#ytdl-playlist-banner .ytdl-pb-dl:disabled {
+    opacity: 0.5; cursor: wait; transform: none;
+    box-shadow: none;
+}
+#ytdl-playlist-banner .ytdl-pb-dl.done {
+    background: #272727;
+    color: #4caf50;
+    box-shadow: none;
+}
+#ytdl-playlist-banner .ytdl-pb-dl.progress {
+    background: #272727;
+    color: #3ea6ff;
+    box-shadow: none;
+}
+
+#ytdl-playlist-banner .ytdl-pb-close {
+    background: none; border: none; color: #aaa; font-size: 18px;
+    cursor: pointer; padding: 4px; border-radius: 50%; transition: background 0.2s ease;
+    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+}
+#ytdl-playlist-banner .ytdl-pb-close:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); }
+
+/* Contenu depliable */
+#ytdl-playlist-banner .ytdl-pb-body {
+    display: none;
+    border-top: 1px solid #3d3d3d;
+}
+#ytdl-playlist-banner.open .ytdl-pb-body {
+    display: block;
+    animation: ytdlFadeIn 0.2s ease;
+}
+
+@keyframes ytdlFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Filters */
+#ytdl-playlist-banner .ytdl-pb-filters {
+    padding: 10px 16px;
+    border-bottom: 1px solid #3d3d3d;
+}
+
+#ytdl-playlist-banner .ytdl-pb-filter-check {
+    display: flex; align-items: center; gap: 8px;
+    color: #f1f1f1; font-size: 13px; cursor: pointer; font-weight: 400;
+}
+#ytdl-playlist-banner .ytdl-pb-filter-check input {
+    accent-color: #ff0000; width: 14px; height: 14px;
+}
+
+#ytdl-playlist-banner .ytdl-pb-filter-range {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 8px; flex-wrap: wrap;
+}
+
+#ytdl-playlist-banner .ytdl-pb-filter-field {
+    display: flex; align-items: center; gap: 6px;
+    color: #aaa; font-size: 13px;
+}
+#ytdl-playlist-banner .ytdl-pb-filter-field span {
+    color: #aaa; font-weight: 400; min-width: 28px;
+}
+#ytdl-playlist-banner .ytdl-pb-filter-field input {
+    width: 56px; padding: 5px 8px;
+    background: #121212; border: 1px solid #3d3d3d; border-radius: 4px;
+    color: #f1f1f1; font-size: 13px; text-align: center; outline: none;
+    transition: border-color 0.2s ease;
+    -moz-appearance: textfield;
+    font-family: 'Roboto', sans-serif;
+}
+#ytdl-playlist-banner .ytdl-pb-filter-field input::-webkit-inner-spin-button,
+#ytdl-playlist-banner .ytdl-pb-filter-field input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+}
+#ytdl-playlist-banner .ytdl-pb-filter-field input:focus { border-color: #3ea6ff; }
+
+#ytdl-playlist-banner .ytdl-pb-filter-result {
+    color: #aaa; font-size: 13px; font-weight: 400;
+    background: none; padding: 0; border-radius: 0;
+}
+
+/* Progress section */
+#ytdl-playlist-banner .ytdl-pb-progress {
+    padding: 10px 16px;
+}
+
+#ytdl-playlist-banner .ytdl-pb-bars {
+    display: flex; gap: 16px; margin-bottom: 4px;
+}
+
+#ytdl-playlist-banner .ytdl-pb-bar-group { flex: 1; }
+
+#ytdl-playlist-banner .ytdl-pb-label {
+    font-size: 12px; color: #aaa; display: block; margin-bottom: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 400;
+}
+
+#ytdl-playlist-banner .ytdl-pb-bar-bg {
+    height: 4px; background: #3d3d3d; border-radius: 2px; overflow: hidden;
+}
+
+#ytdl-playlist-banner .ytdl-pb-bar-fill {
+    height: 100%; background: #ff0000;
+    border-radius: 2px; width: 0%; transition: width 0.3s ease;
+}
+
+#ytdl-playlist-banner .ytdl-pb-bar-total .ytdl-pb-bar-fill {
+    background: #4caf50;
+}
+
+#ytdl-playlist-banner .ytdl-pb-status {
+    font-size: 12px; color: #aaa; display: block; text-align: right; margin-top: 4px;
+}
+
+/* ========== ONGLET PLAYLIST (en bas, pour re-afficher) ========== */
+#ytdl-pb-tab {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: #272727;
+    border: 1px solid #3d3d3d;
+    border-radius: 18px;
+    color: #f1f1f1;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    cursor: pointer;
+    z-index: 99998;
+    box-shadow: none;
+    transition: background 0.2s ease;
+    animation: ytdlFadeIn 0.2s ease;
+}
+#ytdl-pb-tab:hover {
+    transform: none;
+    box-shadow: none;
+    background: #3d3d3d;
+}
+#ytdl-pb-tab span { color: #aaa; }
+
+/* ========== BOUTON LOG (cloche) ========== */
+.ytdl-fab-log {
+    background: #272727;
+    color: #aaa;
+    position: relative;
+}
+.ytdl-fab-log:hover { background: #3d3d3d; color: #f1f1f1; transform: none; }
+
+.ytdl-log-badge {
+    position: absolute; top: -4px; right: -4px;
+    background: #ff0000; color: #fff;
+    font-size: 9px; font-weight: 500;
+    min-width: 16px; height: 16px; border-radius: 8px;
+    display: none; align-items: center; justify-content: center;
+    padding: 0 3px;
+    font-family: 'Roboto', sans-serif;
+}
+.ytdl-log-badge.active { display: flex; }
+
+/* ========== PANNEAU LOG ========== */
+#ytdl-log-panel {
+    position: fixed;
+    bottom: 68px; right: 20px;
+    width: 340px; max-height: 380px;
+    background: #212121;
+    border: 1px solid #3d3d3d;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    z-index: 99999;
+    font-family: 'Roboto', sans-serif;
+    display: none;
+    overflow: hidden;
+    animation: ytdlSlideUp 0.2s ease;
+}
+#ytdl-log-panel.active { display: block; }
+
+#ytdl-log-panel .ytdl-log-header {
+    background: #272727;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 500; font-size: 14px; color: #f1f1f1;
+    border-bottom: 1px solid #3d3d3d;
+}
+#ytdl-log-panel .ytdl-log-header div { display: flex; gap: 6px; align-items: center; }
+#ytdl-log-panel .ytdl-log-clear {
+    background: none; border: 1px solid #3d3d3d; color: #aaa; padding: 3px 8px;
+    border-radius: 4px; font-size: 11px; cursor: pointer; font-family: 'Roboto', sans-serif;
+    transition: all 0.2s ease;
+}
+#ytdl-log-panel .ytdl-log-clear:hover { background: #3d3d3d; color: #f1f1f1; }
+#ytdl-log-panel .ytdl-log-close {
+    background: none; border: none; color: #aaa; font-size: 18px;
+    cursor: pointer; padding: 4px; border-radius: 50%; transition: background 0.2s ease;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+}
+#ytdl-log-panel .ytdl-log-close:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); }
+
+#ytdl-log-panel .ytdl-log-body {
+    overflow-y: auto; max-height: 320px; padding: 4px 0;
+}
+
+#ytdl-log-panel .ytdl-log-empty {
+    text-align: center; color: #555; font-size: 13px; padding: 28px 16px;
+}
+
+#ytdl-log-panel .ytdl-log-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid #2a2a2a;
+    transition: background 0.15s ease;
+}
+#ytdl-log-panel .ytdl-log-item:hover { background: #272727; }
+#ytdl-log-panel .ytdl-log-item:last-child { border-bottom: none; }
+
+#ytdl-log-panel .ytdl-log-icon {
+    width: 22px; height: 22px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0; margin-top: 1px;
+}
+#ytdl-log-panel .ytdl-log-skip .ytdl-log-icon { background: rgba(255,152,0,0.12); color: #ff9800; }
+#ytdl-log-panel .ytdl-log-ok .ytdl-log-icon { background: rgba(76,175,80,0.12); color: #4caf50; }
+#ytdl-log-panel .ytdl-log-err .ytdl-log-icon { background: rgba(244,67,54,0.12); color: #f44336; }
+
+#ytdl-log-panel .ytdl-log-content { flex: 1; min-width: 0; }
+#ytdl-log-panel .ytdl-log-title {
+    font-size: 12px; font-weight: 400; color: #f1f1f1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ytdl-log-panel .ytdl-log-detail {
+    font-size: 11px; color: #aaa; margin-top: 2px;
+}
+#ytdl-log-panel .ytdl-log-time {
+    font-size: 11px; color: #555; white-space: nowrap; flex-shrink: 0; margin-top: 1px;
+}
+
+/* Bouton DL inline (a cote des likes) */
+#ytdl-inline-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    background: #272727;
+    color: #f1f1f1;
+    border: none;
+    border-radius: 18px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    margin-left: 8px;
+    height: 36px;
+    white-space: nowrap;
+    z-index: 9999;
+}
+#ytdl-inline-btn:hover { background: #3d3d3d; transform: none; }
+#ytdl-inline-btn.ytdl-exists { background: #272727; color: #3ea6ff; }
+#ytdl-inline-btn.ytdl-exists:hover { background: #3d3d3d; }
+#ytdl-inline-btn.ytdl-downloaded { background: #272727; color: #4caf50; }
+#ytdl-inline-btn.ytdl-downloaded:hover { background: #3d3d3d; }
+
+/* ========== PANNEAU OPTIONS ========== */
+#ytdl-panel {
+    position: fixed;
+    bottom: 68px;
+    right: 20px;
+    width: 320px;
+    background: #212121;
+    border: 1px solid #3d3d3d;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    z-index: 99999;
+    font-family: 'Roboto', sans-serif;
+    display: none;
+    overflow: hidden;
+    animation: ytdlSlideUp 0.2s ease;
+}
+#ytdl-panel.active { display: block; }
+
+@keyframes ytdlSlideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Header */
+#ytdl-panel .ytdl-header {
+    background: #272727;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #3d3d3d;
+}
+#ytdl-panel .ytdl-header span {
+    font-weight: 500; font-size: 14px; color: #f1f1f1;
+    display: flex; align-items: center; gap: 8px;
+}
+#ytdl-panel .ytdl-close {
+    background: none; border: none; color: #aaa; font-size: 18px;
+    cursor: pointer; padding: 4px; border-radius: 50%; opacity: 1;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s ease;
+}
+#ytdl-panel .ytdl-close:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); opacity: 1; }
+
+/* Body */
+#ytdl-panel .ytdl-body { padding: 14px; }
+
+/* Video info */
+#ytdl-panel .ytdl-video-info {
+    display: flex; gap: 10px; margin-bottom: 12px;
+    padding: 10px; background: #181818; border-radius: 8px; border: 1px solid #3d3d3d;
+}
+#ytdl-panel .ytdl-video-info img {
+    width: 80px; height: 45px; object-fit: cover; border-radius: 4px; flex-shrink: 0;
+}
+#ytdl-panel .ytdl-video-info .ytdl-vi-text { flex: 1; min-width: 0; }
+#ytdl-panel .ytdl-video-info .ytdl-vi-title {
+    font-size: 12px; font-weight: 400; color: #f1f1f1;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+#ytdl-panel .ytdl-video-info .ytdl-vi-meta { font-size: 11px; color: #aaa; margin-top: 2px; }
+
+/* Type toggle */
+#ytdl-panel .ytdl-type-row {
+    display: flex; background: #181818; border: 1px solid #3d3d3d;
+    border-radius: 18px; overflow: hidden; margin-bottom: 10px;
+}
+#ytdl-panel .ytdl-type-row label {
+    flex: 1; text-align: center; padding: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 400; color: #aaa; transition: all 0.2s ease;
+    border-radius: 18px;
+}
+#ytdl-panel .ytdl-type-row input { display: none; }
+#ytdl-panel .ytdl-type-row input:checked + label { background: #3d3d3d; color: #f1f1f1; font-weight: 500; }
+
+/* Selects */
+#ytdl-panel .ytdl-row { display: flex; gap: 8px; margin-bottom: 10px; }
+#ytdl-panel select {
+    flex: 1; padding: 8px 10px; background: #181818; border: 1px solid #3d3d3d;
+    border-radius: 4px; color: #f1f1f1; font-size: 13px; cursor: pointer; outline: none;
+    appearance: none; -webkit-appearance: none;
+    font-family: 'Roboto', sans-serif;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23aaa' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
+    transition: border-color 0.2s ease;
+}
+#ytdl-panel select:focus { border-color: #3ea6ff; }
+
+/* Checkbox */
+#ytdl-panel .ytdl-check {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 12px; color: #aaa; font-size: 13px;
+}
+#ytdl-panel .ytdl-check input { accent-color: #3ea6ff; width: 14px; height: 14px; }
+
+/* Buttons */
+#ytdl-panel .ytdl-btn {
+    width: 100%; padding: 10px; border: none; border-radius: 18px;
+    font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s ease;
+    margin-bottom: 6px; font-family: 'Roboto', sans-serif;
+}
+#ytdl-panel .ytdl-btn-dl { background: #ff0000; color: #fff; }
+#ytdl-panel .ytdl-btn-dl:hover { background: #cc0000; }
+#ytdl-panel .ytdl-btn-queue { background: #272727; color: #f1f1f1; border: 1px solid #3d3d3d; }
+#ytdl-panel .ytdl-btn-queue:hover { background: #3d3d3d; }
+#ytdl-panel .ytdl-btn:disabled { opacity: 0.4; cursor: wait; }
+
+/* Progress */
+#ytdl-panel .ytdl-progress-zone { display: none; margin-bottom: 10px; }
+#ytdl-panel .ytdl-progress-zone.active { display: block; }
+#ytdl-panel .ytdl-progress-bg { background: #3d3d3d; border-radius: 2px; height: 4px; overflow: hidden; }
+#ytdl-panel .ytdl-progress-fill { height: 100%; background: #ff0000; border-radius: 2px; width: 0%; transition: width 0.3s ease; }
+#ytdl-panel .ytdl-progress-text { text-align: center; font-size: 12px; color: #aaa; margin-top: 6px; }
+
+/* Status */
+#ytdl-panel .ytdl-status {
+    padding: 8px 12px; border-radius: 4px; text-align: center;
+    font-size: 12px; margin-bottom: 10px; display: none;
+}
+#ytdl-panel .ytdl-status.ok { display: block; background: rgba(76,175,80,0.1); border: 1px solid rgba(76,175,80,0.3); color: #4caf50; }
+#ytdl-panel .ytdl-status.err { display: block; background: rgba(244,67,54,0.1); border: 1px solid rgba(244,67,54,0.3); color: #f44336; }
+
+/* Prefs label */
+#ytdl-panel .ytdl-prefs-label {
+    text-align: center; font-size: 11px; color: #555; margin-top: 6px; padding-top: 8px;
+    border-top: 1px solid #3d3d3d;
+}
+
+/* ========== BOUTON FILE D'ATTENTE ========== */
+.ytdl-fab-queue {
+    background: #272727;
+    color: #aaa;
+    position: relative;
+    font-size: 16px;
+}
+.ytdl-fab-queue:hover { background: #3d3d3d; color: #f1f1f1; transform: none; }
+
+.ytdl-queue-badge {
+    position: absolute; top: -4px; right: -4px;
+    background: #ff0000; color: #fff;
+    font-size: 9px; font-weight: 500;
+    min-width: 16px; height: 16px; border-radius: 8px;
+    display: none; align-items: center; justify-content: center;
+    padding: 0 3px;
+    font-family: 'Roboto', sans-serif;
+}
+.ytdl-queue-badge.active { display: flex; }
+
+/* ========== PANNEAU FILE D'ATTENTE ========== */
+#ytdl-queue-panel {
+    position: fixed;
+    bottom: 68px; right: 20px;
+    width: 360px; max-height: 460px;
+    background: #212121;
+    border: 1px solid #3d3d3d;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    z-index: 99999;
+    font-family: 'Roboto', sans-serif;
+    display: none;
+    overflow: hidden;
+    animation: ytdlSlideUp 0.2s ease;
+}
+#ytdl-queue-panel.active { display: block; }
+
+#ytdl-queue-panel .ytdl-queue-header {
+    background: #272727;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 500; font-size: 14px; color: #f1f1f1;
+    border-bottom: 1px solid #3d3d3d;
+}
+#ytdl-queue-panel .ytdl-queue-header div { display: flex; gap: 6px; align-items: center; }
+#ytdl-queue-panel .ytdl-queue-count {
+    background: #3d3d3d; color: #f1f1f1; font-size: 11px; font-weight: 400;
+    padding: 1px 7px; border-radius: 8px; margin-left: 6px;
+}
+#ytdl-queue-panel .ytdl-queue-clear {
+    background: none; border: 1px solid #3d3d3d; color: #aaa; padding: 3px 8px;
+    border-radius: 4px; font-size: 11px; cursor: pointer; font-family: 'Roboto', sans-serif;
+    transition: all 0.2s ease;
+}
+#ytdl-queue-panel .ytdl-queue-clear:hover { background: #3d3d3d; color: #f1f1f1; }
+#ytdl-queue-panel .ytdl-queue-close {
+    background: none; border: none; color: #aaa; font-size: 18px;
+    cursor: pointer; padding: 4px; border-radius: 50%; transition: background 0.2s ease;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+}
+#ytdl-queue-panel .ytdl-queue-close:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); }
+
+#ytdl-queue-panel .ytdl-queue-body {
+    overflow-y: auto; max-height: 400px; padding: 0;
+}
+
+#ytdl-queue-panel .ytdl-queue-empty {
+    text-align: center; color: #555; font-size: 13px; padding: 28px 16px;
+}
+
+.ytdl-queue-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid #2a2a2a;
+    transition: background 0.15s ease;
+}
+.ytdl-queue-item:hover { background: #272727; }
+.ytdl-queue-item:last-child { border-bottom: none; }
+
+.ytdl-queue-item .ytdl-qi-icon {
+    width: 26px; height: 26px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+}
+.ytdl-queue-item.waiting .ytdl-qi-icon { background: rgba(255,255,255,0.05); color: #aaa; }
+.ytdl-queue-item.active .ytdl-qi-icon { background: rgba(62,166,255,0.12); color: #3ea6ff; }
+.ytdl-queue-item.done .ytdl-qi-icon { background: rgba(76,175,80,0.12); color: #4caf50; }
+.ytdl-queue-item.skipped .ytdl-qi-icon { background: rgba(62,166,255,0.12); color: #3ea6ff; }
+.ytdl-queue-item.error .ytdl-qi-icon { background: rgba(244,67,54,0.12); color: #f44336; }
+
+.ytdl-queue-item .ytdl-qi-info { flex: 1; min-width: 0; }
+.ytdl-queue-item .ytdl-qi-title {
+    font-size: 12px; font-weight: 400; color: #f1f1f1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ytdl-queue-item .ytdl-qi-meta {
+    font-size: 11px; color: #aaa; margin-top: 2px;
+    display: flex; align-items: center; gap: 6px;
+}
+
+.ytdl-queue-item .ytdl-qi-progress {
+    height: 2px; background: #3d3d3d; border-radius: 1px;
+    margin-top: 4px; overflow: hidden;
+}
+.ytdl-queue-item .ytdl-qi-progress-fill {
+    height: 100%; background: #ff0000;
+    border-radius: 1px; width: 0%; transition: width 0.3s ease;
+}
+.ytdl-queue-item.done .ytdl-qi-progress-fill { background: #4caf50; width: 100%; }
+.ytdl-queue-item.skipped .ytdl-qi-progress-fill { background: #3ea6ff; }
+.ytdl-queue-item.error .ytdl-qi-progress-fill { background: #f44336; }
+
+.ytdl-queue-item .ytdl-qi-actions {
+    display: flex; gap: 2px; flex-shrink: 0; align-items: center;
+}
+
+.ytdl-queue-item .ytdl-qi-btn {
+    background: none; border: none; color: #aaa; font-size: 13px;
+    cursor: pointer; padding: 4px 6px; border-radius: 4px;
+    transition: all 0.2s ease; line-height: 1;
+}
+.ytdl-queue-item .ytdl-qi-up:hover,
+.ytdl-queue-item .ytdl-qi-down:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); }
+.ytdl-queue-item .ytdl-qi-skip { color: #aaa; font-size: 12px; letter-spacing: -3px; }
+.ytdl-queue-item .ytdl-qi-skip:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); }
+.ytdl-queue-item .ytdl-qi-retry { color: #aaa; font-size: 14px; font-weight: 400; }
+.ytdl-queue-item .ytdl-qi-retry:hover { color: #f1f1f1; background: rgba(255,255,255,0.1); }
+
+.ytdl-queue-item .ytdl-qi-remove {
+    background: none; border: none; color: #555; font-size: 16px;
+    cursor: pointer; padding: 4px 6px; border-radius: 4px;
+    flex-shrink: 0; transition: all 0.2s ease;
+}
+.ytdl-queue-item .ytdl-qi-remove:hover { color: #f44336; background: rgba(244,67,54,0.1); }

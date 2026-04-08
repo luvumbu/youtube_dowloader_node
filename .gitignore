@@ -1,0 +1,16 @@
+node_modules/
+downloads/
+data/
+ffmpeg/
+ffmpeg_temp.zip
+ffmpeg_extract/
+node_local/
+node_temp.zip
+node_extract/
+python_local/
+python_temp.zip
+.installed
+server_error.log
+.claude/
+youtube_downloader_node*.zip
+yt_downloader_v*.zip

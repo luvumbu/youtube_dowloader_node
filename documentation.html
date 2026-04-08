@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation Technique - YouTube Downloader Node</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            line-height: 1.7;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 280px;
+            height: 100vh;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            overflow-y: auto;
+            padding: 20px 0;
+            z-index: 100;
+        }
+
+        .sidebar h2 {
+            color: #ff4444;
+            font-size: 16px;
+            padding: 0 20px 15px;
+            border-bottom: 1px solid #333;
+            margin-bottom: 10px;
+        }
+
+        .sidebar a {
+            display: block;
+            color: #aaa;
+            text-decoration: none;
+            padding: 8px 20px;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .sidebar a:hover {
+            color: #ff4444;
+            background: #222;
+            padding-left: 25px;
+        }
+
+        .sidebar .section-title {
+            color: #666;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 15px 20px 5px;
+            font-weight: bold;
+        }
+
+        /* Main content */
+        .main {
+            margin-left: 280px;
+            padding: 40px 60px;
+            max-width: 1000px;
+        }
+
+        h1 {
+            color: #ff4444;
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 18px;
+            margin-bottom: 40px;
+        }
+
+        h2 {
+            color: #ff4444;
+            font-size: 26px;
+            margin-top: 50px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #333;
+        }
+
+        h3 {
+            color: #e0e0e0;
+            font-size: 20px;
+            margin-top: 30px;
+            margin-bottom: 12px;
+        }
+
+        h4 {
+            color: #ccc;
+            font-size: 16px;
+            margin-top: 20px;
+            margin-bottom: 8px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: #bbb;
+        }
+
+        /* Code blocks */
+        pre {
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-x: auto;
+            margin: 15px 0 20px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        code {
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            color: #a8d8ea;
+        }
+
+        p code, li code {
+            background: #1a1a2e;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #f0a500;
+        }
+
+        /* Steps */
+        .step {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 25px 30px;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .step-number {
+            position: absolute;
+            top: -15px;
+            left: 20px;
+            background: #ff4444;
+            color: #fff;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .step h4 {
+            margin-top: 5px;
+            color: #ff4444;
+        }
+
+        /* Info boxes */
+        .info-box {
+            background: #1a2a1a;
+            border-left: 4px solid #4caf50;
+            padding: 15px 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 15px 0;
+        }
+
+        .warning-box {
+            background: #2a2a1a;
+            border-left: 4px solid #ff9800;
+            padding: 15px 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 15px 0;
+        }
+
+        .error-box {
+            background: #2a1a1a;
+            border-left: 4px solid #f44336;
+            padding: 15px 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 15px 0;
+        }
+
+        .info-box strong, .warning-box strong, .error-box strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        /* Lists */
+        ul, ol {
+            margin: 10px 0 15px 25px;
+            color: #bbb;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 20px;
+        }
+
+        th {
+            background: #1a1a2e;
+            color: #ff4444;
+            padding: 12px 15px;
+            text-align: left;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid #222;
+            font-size: 14px;
+        }
+
+        tr:hover td {
+            background: #1a1a1a;
+        }
+
+        /* Schema / Diagram */
+        .diagram {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+            font-family: monospace;
+            text-align: center;
+            line-height: 1.8;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+
+        .diagram .box {
+            display: inline-block;
+            background: #1a1a2e;
+            border: 1px solid #4444ff;
+            border-radius: 8px;
+            padding: 8px 16px;
+            margin: 5px;
+            color: #a8d8ea;
+        }
+
+        .diagram .arrow {
+            color: #ff4444;
+            font-size: 18px;
+            margin: 0 5px;
+        }
+
+        .diagram .box-green {
+            background: #1a2a1a;
+            border-color: #4caf50;
+            color: #a8eab0;
+        }
+
+        .diagram .box-orange {
+            background: #2a2a1a;
+            border-color: #ff9800;
+            color: #f0d080;
+        }
+
+        .diagram .box-red {
+            background: #2a1a1a;
+            border-color: #ff4444;
+            color: #eaa8a8;
+        }
+
+        /* File tree */
+        .file-tree {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px 25px;
+            margin: 15px 0;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.8;
+        }
+
+        .file-tree .folder {
+            color: #f0a500;
+        }
+
+        .file-tree .file {
+            color: #a8d8ea;
+        }
+
+        .file-tree .comment {
+            color: #666;
+            font-style: italic;
+        }
+
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .badge-required { background: #2a1a1a; color: #ff4444; border: 1px solid #ff4444; }
+        .badge-auto { background: #1a2a1a; color: #4caf50; border: 1px solid #4caf50; }
+        .badge-optional { background: #1a1a2a; color: #4488ff; border: 1px solid #4488ff; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; padding: 20px; }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
+</head>
+<body>
+
+<!-- ====== SIDEBAR ====== -->
+<nav class="sidebar">
+    <h2>YouTube Downloader</h2>
+
+    <div class="section-title">Introduction</div>
+    <a href="#presentation">Presentation du projet</a>
+    <a href="#prerequis">Prerequis</a>
+    <a href="#structure">Structure des fichiers</a>
+
+    <div class="section-title">Installation</div>
+    <a href="#install-auto">Installation automatique</a>
+    <a href="#install-manual">Installation manuelle</a>
+    <a href="#lancement">Lancement du programme</a>
+
+    <div class="section-title">Architecture</div>
+    <a href="#schema-global">Schema global</a>
+    <a href="#serveur">Le serveur (server.js)</a>
+    <a href="#config">La configuration (config.js)</a>
+    <a href="#worker">Le worker (worker.js)</a>
+    <a href="#api-routes">Les routes API</a>
+
+    <div class="section-title">Fonctionnement</div>
+    <a href="#flux-telechargement">Flux de telechargement</a>
+    <a href="#frontend">L'interface web</a>
+    <a href="#donnees">Stockage des donnees</a>
+    <a href="#extension">Extension navigateur</a>
+
+    <div class="section-title">Reference</div>
+    <a href="#api-reference">Reference API complete</a>
+    <a href="#formats">Formats supportes</a>
+    <a href="#depannage">Depannage</a>
+</nav>
+
+<!-- ====== MAIN CONTENT ====== -->
+<div class="main">
+
+    <h1>YouTube Downloader Node</h1>
+    <p class="subtitle">Documentation technique complete - Guide pas a pas pour debutants</p>
+
+    <!-- ======================= -->
+    <!-- PRESENTATION            -->
+    <!-- ======================= -->
+    <h2 id="presentation">Presentation du projet</h2>
+
+    <p>
+        <strong>YouTube Downloader Node</strong> est une application web locale qui permet de telecharger
+        des videos et de l'audio depuis YouTube. Elle tourne entierement sur votre ordinateur (rien n'est
+        envoye sur internet sauf les requetes vers YouTube).
+    </p>
+
+    <h3>Ce que fait le programme</h3>
+    <ul>
+        <li>Telecharger des videos YouTube en <strong>MP4, MKV ou WEBM</strong></li>
+        <li>Extraire l'audio en <strong>MP3, FLAC, WAV, AAC ou OGG</strong></li>
+        <li>Choisir la qualite (1080p, 720p, etc. pour la video / haute, moyenne, basse pour l'audio)</li>
+        <li>Telecharger des playlists entieres</li>
+        <li>Rechercher des videos YouTube directement depuis l'application</li>
+        <li>Organiser les fichiers telecharges dans une bibliotheque locale avec des dossiers</li>
+        <li>Gerer une file d'attente de telechargements</li>
+        <li>Recuperer la couverture/miniature des videos</li>
+        <li>Utiliser une extension de navigateur pour telecharger directement depuis YouTube</li>
+    </ul>
+
+    <h3>Les technologies utilisees</h3>
+    <table>
+        <tr>
+            <th>Technologie</th>
+            <th>Role</th>
+            <th>Explication simple</th>
+        </tr>
+        <tr>
+            <td><code>Node.js</code></td>
+            <td>Moteur du serveur</td>
+            <td>Permet d'executer du JavaScript en dehors du navigateur, c'est le "cerveau" de l'application</td>
+        </tr>
+        <tr>
+            <td><code>Express</code></td>
+            <td>Serveur web</td>
+            <td>Bibliotheque qui cree un serveur web et gere les requetes HTTP (les URL que vous visitez)</td>
+        </tr>
+        <tr>
+            <td><code>Python</code></td>
+            <td>Langage requis</td>
+            <td>Necessaire car yt-dlp est ecrit en Python</td>
+        </tr>
+        <tr>
+            <td><code>yt-dlp</code></td>
+            <td>Moteur de telechargement</td>
+            <td>Programme Python qui sait comment telecharger depuis YouTube (gere les formats, DRM, etc.)</td>
+        </tr>
+        <tr>
+            <td><code>ffmpeg</code></td>
+            <td>Conversion audio/video</td>
+            <td>Outil qui convertit les fichiers entre formats (ex: convertir en MP3) et fusionne audio+video</td>
+        </tr>
+    </table>
+
+    <!-- ======================= -->
+    <!-- PREREQUIS               -->
+    <!-- ======================= -->
+    <h2 id="prerequis">Prerequis</h2>
+
+    <p>
+        Sur un Windows tout neuf (sans aucun programme installe), voici ce dont vous avez besoin.
+        Le script <code>start.bat</code> installe tout automatiquement, mais voici le detail :
+    </p>
+
+    <table>
+        <tr>
+            <th>Programme</th>
+            <th>Version</th>
+            <th>Pourquoi c'est necessaire</th>
+            <th>Installation</th>
+        </tr>
+        <tr>
+            <td><strong>Node.js</strong></td>
+            <td>LTS (20+)</td>
+            <td>Execute le serveur web et le code JavaScript</td>
+            <td><span class="badge badge-auto">Auto</span> via winget</td>
+        </tr>
+        <tr>
+            <td><strong>Python</strong></td>
+            <td>3.12+</td>
+            <td>Requis pour faire tourner yt-dlp</td>
+            <td><span class="badge badge-auto">Auto</span> via winget</td>
+        </tr>
+        <tr>
+            <td><strong>yt-dlp</strong></td>
+            <td>Derniere</td>
+            <td>Le moteur qui sait telecharger depuis YouTube</td>
+            <td><span class="badge badge-auto">Auto</span> via pip</td>
+        </tr>
+        <tr>
+            <td><strong>ffmpeg</strong></td>
+            <td>Derniere</td>
+            <td>Convertit et fusionne les fichiers audio/video</td>
+            <td><span class="badge badge-auto">Auto</span> via winget</td>
+        </tr>
+    </table>
+
+    <div class="info-box">
+        <strong>Qu'est-ce que winget ?</strong>
+        <code>winget</code> est le gestionnaire de paquets integre a Windows 10/11. Il permet d'installer
+        des programmes depuis la ligne de commande sans avoir a telecharger manuellement un installeur.
+        Il est deja present sur Windows 11.
+    </div>
+
+    <!-- ======================= -->
+    <!-- STRUCTURE               -->
+    <!-- ======================= -->
+    <h2 id="structure">Structure des fichiers</h2>
+
+    <p>Voici comment le projet est organise :</p>
+
+    <div class="file-tree">
+<span class="folder">youtube_dowloader_node/</span>
+<br>&nbsp;&nbsp;<span class="file">server.js</span> <span class="comment">....... Point d'entree - lance le serveur web</span>
+<br>&nbsp;&nbsp;<span class="file">config.js</span> <span class="comment">....... Configuration - detecte Python, ffmpeg, yt-dlp</span>
+<br>&nbsp;&nbsp;<span class="file">worker.js</span> <span class="comment">....... Moteur - execute les telechargements en arriere-plan</span>
+<br>&nbsp;&nbsp;<span class="file">start.bat</span> <span class="comment">....... Script Windows - installe tout et lance le programme</span>
+<br>&nbsp;&nbsp;<span class="file">package.json</span> <span class="comment">.... Liste des dependances Node.js</span>
+<br>
+<br>&nbsp;&nbsp;<span class="folder">api/</span> <span class="comment">................. Dossier des routes API (le "back-end")</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">download.js</span> <span class="comment">.... Demarre un telechargement</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">info.js</span> <span class="comment">........ Recupere les infos d'une video</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">progress.js</span> <span class="comment">.... Verifie la progression d'un telechargement</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">queue.js</span> <span class="comment">....... Gere la file d'attente</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">library.js</span> <span class="comment">..... Gere la bibliotheque locale</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">playlist.js</span> <span class="comment">.... Recupere les videos d'une playlist</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">search.js</span> <span class="comment">...... Recherche sur YouTube</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">profile.js</span> <span class="comment">..... Gere les profils utilisateurs</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">history.js</span> <span class="comment">..... Historique des telechargements</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">notifications.js</span> Notifications</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">system.js</span> <span class="comment">...... Infos systeme et mise a jour yt-dlp</span>
+<br>
+<br>&nbsp;&nbsp;<span class="folder">public/</span> <span class="comment">.............. Dossier du site web (le "front-end")</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">index.html</span> <span class="comment">..... La page web principale</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="folder">js/</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">app.js</span> <span class="comment">......... Toute la logique de l'interface (2600+ lignes)</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="folder">css/</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">style.css</span> <span class="comment">...... Les styles visuels</span>
+<br>
+<br>&nbsp;&nbsp;<span class="folder">data/</span> <span class="comment">................ Dossier de donnees (JSON)</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">library.json</span> <span class="comment">... Catalogue des fichiers telecharges</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">profiles.json</span> <span class="comment">.. Profils utilisateurs</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">history.json</span> <span class="comment">... Historique</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">queue.json</span> <span class="comment">..... File d'attente</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">notifications.json</span> Notifications</span>
+<br>
+<br>&nbsp;&nbsp;<span class="folder">downloads/</span> <span class="comment">........... Fichiers audio/video telecharges</span>
+<br>
+<br>&nbsp;&nbsp;<span class="folder">extension/</span> <span class="comment">........... Extension Chrome/Edge</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">manifest.json</span> <span class="comment">.. Configuration de l'extension</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">content.js</span> <span class="comment">..... Script injecte dans les pages YouTube</span>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">popup.html/js</span> <span class="comment">.. Popup de l'extension</span>
+    </div>
+
+    <!-- ======================= -->
+    <!-- INSTALLATION AUTO       -->
+    <!-- ======================= -->
+    <h2 id="install-auto">Installation automatique (recommandee)</h2>
+
+    <p>
+        Le fichier <code>start.bat</code> fait tout automatiquement. Il suffit de double-cliquer dessus.
+        Voici exactement ce qu'il fait, etape par etape :
+    </p>
+
+    <div class="step">
+        <div class="step-number">1</div>
+        <h4>Verification de Node.js</h4>
+        <p>Le script cherche si <code>node</code> est installe sur votre PC. Si non, il l'installe via :</p>
+        <pre><code>winget install OpenJS.NodeJS.LTS</code></pre>
+        <p>Apres l'installation, il vous demande de <strong>fermer et relancer</strong> le script (car le PATH
+        systeme doit etre mis a jour pour reconnaitre la commande <code>node</code>).</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">2</div>
+        <h4>Verification de Python</h4>
+        <p>Meme chose pour Python. Si absent :</p>
+        <pre><code>winget install Python.Python.3.12</code></pre>
+        <p>Relancer le script apres installation.</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">3</div>
+        <h4>Installation de yt-dlp</h4>
+        <p>Verifie si le module Python <code>yt_dlp</code> est disponible. Si non :</p>
+        <pre><code>python -m pip install yt-dlp</code></pre>
+        <p><code>pip</code> est le gestionnaire de paquets de Python (installe avec Python). Pas besoin de relancer ici.</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">4</div>
+        <h4>Verification de ffmpeg</h4>
+        <p>Si ffmpeg n'est pas trouve :</p>
+        <pre><code>winget install Gyan.FFmpeg</code></pre>
+        <p>Relancer le script apres installation.</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">5</div>
+        <h4>Installation des dependances Node.js</h4>
+        <p>Si le dossier <code>node_modules</code> n'existe pas, il lance :</p>
+        <pre><code>npm install</code></pre>
+        <p>Cela lit le fichier <code>package.json</code> et telecharge les deux bibliotheques necessaires :</p>
+        <ul>
+            <li><code>express</code> - pour creer le serveur web</li>
+            <li><code>cors</code> - pour autoriser les requetes depuis l'extension navigateur</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <div class="step-number">6</div>
+        <h4>Creation des dossiers et fichiers</h4>
+        <p>Le script cree les dossiers et fichiers de donnees s'ils n'existent pas :</p>
+        <pre><code>downloads/          &larr; ou seront stockes les fichiers telecharges
+data/               &larr; ou sont stockees les donnees de l'application
+data/library.json   &larr; {"folders":[],"items":[]}
+data/profiles.json  &larr; []
+data/history.json   &larr; []
+data/queue.json     &larr; []
+data/notifications.json &larr; []</code></pre>
+    </div>
+
+    <div class="step">
+        <div class="step-number">7</div>
+        <h4>Lancement</h4>
+        <p>Le script ouvre votre navigateur par defaut a l'adresse <code>http://localhost:3000</code>
+        puis lance le serveur Node.js :</p>
+        <pre><code>start http://localhost:3000
+node server.js</code></pre>
+    </div>
+
+    <div class="warning-box">
+        <strong>Important : les relances</strong>
+        La premiere fois, vous devrez peut-etre lancer <code>start.bat</code> jusqu'a <strong>4 fois</strong> car
+        chaque installation de programme (Node.js, Python, ffmpeg) necessite un redemarrage du script pour que
+        Windows reconnaisse la nouvelle commande.
+    </div>
+
+    <!-- ======================= -->
+    <!-- INSTALLATION MANUELLE   -->
+    <!-- ======================= -->
+    <h2 id="install-manual">Installation manuelle</h2>
+
+    <p>Si vous preferez tout faire a la main ou si <code>start.bat</code> ne fonctionne pas :</p>
+
+    <h3>1. Installer Node.js</h3>
+    <p>Telechargez le depuis <code>https://nodejs.org</code> (version LTS). Lancez l'installeur et suivez les etapes.</p>
+    <p>Verifiez dans un terminal :</p>
+    <pre><code>node --version    &larr; doit afficher v20.x.x ou plus
+npm --version     &larr; doit afficher 10.x.x ou plus</code></pre>
+
+    <h3>2. Installer Python</h3>
+    <p>Telechargez le depuis <code>https://python.org</code> (version 3.12+).</p>
+    <div class="error-box">
+        <strong>Attention !</strong>
+        Lors de l'installation, cochez absolument la case <strong>"Add Python to PATH"</strong> en bas de la
+        premiere fenetre. Sans ca, Windows ne trouvera pas la commande <code>python</code>.
+    </div>
+    <pre><code>python --version  &larr; doit afficher Python 3.12.x</code></pre>
+
+    <h3>3. Installer yt-dlp</h3>
+    <pre><code>python -m pip install yt-dlp</code></pre>
+    <p>Verification :</p>
+    <pre><code>python -m yt_dlp --version</code></pre>
+
+    <h3>4. Installer ffmpeg</h3>
+    <p>Via winget :</p>
+    <pre><code>winget install Gyan.FFmpeg</code></pre>
+    <p>Ou telechargez manuellement depuis <code>https://ffmpeg.org/download.html</code> et ajoutez le dossier <code>bin</code> au PATH systeme.</p>
+    <pre><code>ffmpeg -version   &larr; doit afficher la version</code></pre>
+
+    <h3>5. Installer les dependances du projet</h3>
+    <p>Ouvrez un terminal dans le dossier du projet :</p>
+    <pre><code>cd chemin/vers/youtube_dowloader_node
+npm install</code></pre>
+
+    <h3>6. Creer les dossiers</h3>
+    <pre><code>mkdir downloads
+mkdir data</code></pre>
+
+    <!-- ======================= -->
+    <!-- LANCEMENT               -->
+    <!-- ======================= -->
+    <h2 id="lancement">Lancement du programme</h2>
+
+    <h3>Methode 1 : double-clic sur start.bat</h3>
+    <p>Le plus simple. Double-cliquez sur <code>start.bat</code>, tout se lance automatiquement.</p>
+
+    <h3>Methode 2 : via le terminal</h3>
+    <pre><code>cd chemin/vers/youtube_dowloader_node
+node server.js</code></pre>
+    <p>Puis ouvrez votre navigateur a l'adresse : <code>http://localhost:3000</code></p>
+
+    <h3>Methode 3 : via npm</h3>
+    <pre><code>npm start</code></pre>
+
+    <div class="info-box">
+        <strong>Que signifie localhost:3000 ?</strong>
+        <code>localhost</code> signifie "cet ordinateur". Le <code>:3000</code> est le numero de port.
+        C'est comme un numero de porte dans un immeuble : votre PC est l'immeuble, et le port 3000 est
+        la porte derriere laquelle le serveur YouTube Downloader ecoute les requetes.
+    </div>
+
+    <!-- ======================= -->
+    <!-- SCHEMA GLOBAL           -->
+    <!-- ======================= -->
+    <h2 id="schema-global">Schema global de l'architecture</h2>
+
+    <p>Voici comment les differentes parties du programme communiquent entre elles :</p>
+
+    <div class="diagram">
+        <div style="margin-bottom: 20px;">
+            <span class="box" style="font-size: 16px;">Votre navigateur web</span>
+            <br><span style="color:#555;">Affiche l'interface (public/index.html + app.js + style.css)</span>
+        </div>
+
+        <div style="margin-bottom: 5px;"><span class="arrow">&darr;</span> Requetes HTTP (ex: POST /api/download) <span class="arrow">&darr;</span></div>
+
+        <div style="margin-bottom: 20px;">
+            <span class="box-green">Serveur Express (server.js - port 3000)</span>
+            <br><span style="color:#555;">Recoit les requetes et les route vers la bonne API</span>
+        </div>
+
+        <div style="margin-bottom: 5px;"><span class="arrow">&darr;</span> Appelle la route correspondante <span class="arrow">&darr;</span></div>
+
+        <div style="margin-bottom: 20px;">
+            <span class="box-orange">Routes API (api/*.js)</span>
+            <br><span style="color:#555;">download.js | info.js | progress.js | library.js | ...</span>
+        </div>
+
+        <div style="display: flex; justify-content: center; gap: 40px; margin-top: 20px; flex-wrap: wrap;">
+            <div style="text-align: center;">
+                <span class="arrow">&darr;</span> Spawn processus
+                <br><span class="box-red">Worker (worker.js)</span>
+                <br><span style="color:#555;">&darr;</span>
+                <br><span class="box-red">yt-dlp + ffmpeg</span>
+                <br><span style="color:#555;">Telecharge et convertit</span>
+            </div>
+            <div style="text-align: center;">
+                <span class="arrow">&darr;</span> Lecture/Ecriture
+                <br><span class="box">Fichiers JSON (data/)</span>
+                <br><span style="color:#555;">library, queue, history...</span>
+            </div>
+            <div style="text-align: center;">
+                <span class="arrow">&darr;</span> Stockage
+                <br><span class="box">Fichiers media (downloads/)</span>
+                <br><span style="color:#555;">MP3, MP4, couvertures...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================= -->
+    <!-- SERVEUR                 -->
+    <!-- ======================= -->
+    <h2 id="serveur">Le serveur (server.js)</h2>
+
+    <p>C'est le <strong>point d'entree</strong> du programme. Quand vous lancez <code>node server.js</code>,
+    voici ce qui se passe dans l'ordre :</p>
+
+    <h3>Etape 1 : Chargement des modules</h3>
+    <pre><code>const express = require('express');   // Serveur web
+const cors = require('cors');         // Autorise les requetes cross-origin
+const path = require('path');         // Gestion des chemins de fichiers
+const fs = require('fs');             // Lecture/ecriture de fichiers
+const config = require('./config');   // Configuration auto-detectee</code></pre>
+    <p>
+        <code>require()</code> est la facon dont Node.js importe des modules. C'est comme dire
+        "j'ai besoin de cet outil, charge-le en memoire".
+    </p>
+
+    <h3>Etape 2 : Configuration des middlewares</h3>
+    <pre><code>const app = express();            // Cree une application Express
+app.use(cors());                  // Autorise les requetes depuis d'autres origines
+app.use(express.json());          // Comprend les donnees JSON dans les requetes
+app.use(express.urlencoded({ extended: true })); // Comprend les formulaires</code></pre>
+    <p>
+        Un <strong>middleware</strong> est un traitement que chaque requete subit avant d'arriver
+        a sa destination. C'est comme un controle de securite a l'entree d'un batiment.
+    </p>
+
+    <h3>Etape 3 : Fichiers statiques</h3>
+    <pre><code>app.use(express.static(path.join(__dirname, 'public')));
+app.use('/downloads', express.static(config.DOWNLOADS_DIR));</code></pre>
+    <p>
+        Le serveur sert directement les fichiers du dossier <code>public/</code> (HTML, CSS, JS) et
+        rend les fichiers telecharges accessibles via l'URL <code>/downloads/nom-du-fichier.mp3</code>.
+    </p>
+
+    <h3>Etape 4 : Montage des routes API</h3>
+    <pre><code>app.use('/api/download', require('./api/download'));
+app.use('/api/info', require('./api/info'));
+app.use('/api/progress', require('./api/progress'));
+// ... 8 autres routes</code></pre>
+    <p>
+        Chaque <code>app.use('/api/xxx', ...)</code> dit a Express : "quand quelqu'un visite
+        <code>/api/xxx</code>, utilise le code dans le fichier <code>api/xxx.js</code>".
+    </p>
+
+    <h3>Etape 5 : Demarrage</h3>
+    <pre><code>app.listen(config.PORT, () => {
+    console.log(`YouTube Downloader demarre sur http://localhost:${config.PORT}`);
+});</code></pre>
+    <p>Le serveur commence a ecouter sur le port 3000. Il est pret a recevoir des requetes.</p>
+
+    <!-- ======================= -->
+    <!-- CONFIG                  -->
+    <!-- ======================= -->
+    <h2 id="config">La configuration (config.js)</h2>
+
+    <p>
+        Ce fichier detecte automatiquement ou se trouvent les programmes necessaires sur votre PC.
+        Aucune configuration manuelle n'est necessaire.
+    </p>
+
+    <h3>Ce qu'il detecte :</h3>
+
+    <div class="step">
+        <div class="step-number">1</div>
+        <h4>Python</h4>
+        <p>Cherche <code>python</code> ou <code>python3</code> dans le PATH systeme avec la commande <code>where</code>.</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">2</div>
+        <h4>ffmpeg</h4>
+        <p>Cherche <code>ffmpeg</code> dans le PATH et recupere le chemin de son dossier parent.</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">3</div>
+        <h4>yt-dlp</h4>
+        <p>Si Python est trouve, utilise <code>python -m yt_dlp</code> (plus fiable sur Windows car evite
+        le blocage "Smart App Control"). Sinon, tente <code>yt-dlp</code> directement.</p>
+    </div>
+
+    <h3>Les valeurs de configuration :</h3>
+    <pre><code>{
+    PORT: 3000,                              // Port du serveur
+    DOWNLOADS_DIR: "./downloads",            // Dossier des telechargements
+    DATA_DIR: "./data",                      // Dossier des donnees
+
+    AUDIO_FORMATS: ['mp3', 'flac', 'wav', 'aac', 'ogg'],
+    VIDEO_FORMATS: ['mp4', 'mkv', 'webm'],
+    AUDIO_QUALITIES: ['0', '5', '9'],        // 0 = meilleure, 9 = plus legere
+    VIDEO_QUALITIES: ['best', '1080', '720', '480', '360'],
+
+    // Validation des URLs YouTube et des IDs de jobs
+    YOUTUBE_URL_PATTERN: /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/...$/,
+    JOB_ID_PATTERN: /^yt_[a-f0-9]+$/
+}</code></pre>
+
+    <!-- ======================= -->
+    <!-- WORKER                  -->
+    <!-- ======================= -->
+    <h2 id="worker">Le worker (worker.js)</h2>
+
+    <p>
+        C'est le <strong>coeur du telechargement</strong>. Ce fichier est lance comme un processus
+        independant pour chaque telechargement. Cela permet au serveur de continuer a repondre
+        pendant que le telechargement tourne en arriere-plan.
+    </p>
+
+    <h3>Comment il est lance :</h3>
+    <pre><code>// Dans api/download.js, le serveur fait :
+spawn('node', ['worker.js', jobId, url, cover, type, format, quality]);</code></pre>
+    <p>Le worker recoit 6 parametres :</p>
+    <table>
+        <tr><th>Parametre</th><th>Exemple</th><th>Description</th></tr>
+        <tr><td><code>jobId</code></td><td>yt_a1b2c3d4</td><td>Identifiant unique du telechargement</td></tr>
+        <tr><td><code>url</code></td><td>https://youtube.com/watch?v=xxx</td><td>URL de la video</td></tr>
+        <tr><td><code>cover</code></td><td>1</td><td>1 = sauver la miniature, 0 = non</td></tr>
+        <tr><td><code>type</code></td><td>audio</td><td>audio ou video</td></tr>
+        <tr><td><code>format</code></td><td>mp3</td><td>Format de sortie</td></tr>
+        <tr><td><code>quality</code></td><td>0</td><td>Qualite (0=meilleure pour audio, 1080=Full HD pour video)</td></tr>
+    </table>
+
+    <h3>Le flux complet du worker :</h3>
+
+    <div class="diagram" style="text-align: left; padding: 20px 30px;">
+<pre style="background: none; border: none; padding: 0; margin: 0; color: #a8d8ea;">
+1. Recoit les parametres (jobId, url, format, qualite...)
+   |
+2. Cree un fichier de log : downloads/{jobId}.log
+   |     &larr; "Demarrage..."
+   |
+3. Construit la commande yt-dlp adaptee au type demande
+   |     Ex pour audio : python -m yt_dlp -x --audio-format mp3 ...
+   |     Ex pour video : python -m yt_dlp -f "bestvideo+bestaudio" ...
+   |
+4. Execute la commande yt-dlp via spawn()
+   |     &larr; Ecrit la progression dans le fichier .log en temps reel
+   |     &larr; Le frontend lit ce .log pour afficher la barre de progression
+   |
+5. yt-dlp termine
+   |
+6. Cherche le fichier telecharge (downloads/{jobId}.mp3)
+   |     &larr; Gere les noms de fichiers avec suffixes (ex: .f399.mp4)
+   |
+7. Gere la couverture (si demandee)
+   |     a. Cherche une image ecrite par yt-dlp (thumbnail)
+   |     b. Si pas trouvee : telecharge depuis i.ytimg.com
+   |     c. Convertit en JPG si necessaire via ffmpeg
+   |
+8. Renomme le fichier avec le titre de la video YouTube
+   |     Ex: yt_a1b2c3d4.mp3 &rarr; Ma Super Chanson.mp3
+   |
+9. Nettoie les fichiers temporaires
+   |
+10. Cree le fichier .done avec les infos finales
+       downloads/{jobId}.done = {"file":"Ma Super Chanson.mp3","cover":"Ma Super Chanson.jpg"}
+</pre>
+    </div>
+
+    <h3>Exemple de commande yt-dlp generee :</h3>
+
+    <h4>Pour telecharger de l'audio MP3 en qualite maximale :</h4>
+    <pre><code>python -m yt_dlp \
+  --ffmpeg-location "C:/Program Files/ffmpeg/bin" \
+  --newline --progress-delta 1 \
+  -o "downloads/yt_a1b2c3d4.%(ext)s" \
+  --no-playlist \
+  -x --audio-format mp3 --audio-quality 0 \
+  --embed-thumbnail --write-thumbnail --convert-thumbnails jpg \
+  "https://youtube.com/watch?v=dQw4w9WgXcQ"</code></pre>
+
+    <h4>Pour telecharger une video MP4 en 1080p :</h4>
+    <pre><code>python -m yt_dlp \
+  --ffmpeg-location "C:/Program Files/ffmpeg/bin" \
+  --newline --progress-delta 1 \
+  -o "downloads/yt_a1b2c3d4.%(ext)s" \
+  --no-playlist \
+  -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
+  --merge-output-format mp4 \
+  --postprocessor-args "Merger+ffmpeg_o:-c:v copy -c:a aac" \
+  --embed-thumbnail --convert-thumbnails jpg \
+  "https://youtube.com/watch?v=dQw4w9WgXcQ"</code></pre>
+
+    <!-- ======================= -->
+    <!-- API ROUTES              -->
+    <!-- ======================= -->
+    <h2 id="api-routes">Les routes API (api/*.js)</h2>
+
+    <p>
+        Les routes API sont les "portes d'entree" du serveur. Chaque fichier dans le dossier <code>api/</code>
+        gere un type de fonctionnalite. Le frontend (la page web) communique avec le serveur en envoyant
+        des requetes HTTP a ces routes.
+    </p>
+
+    <div class="info-box">
+        <strong>C'est quoi une API ?</strong>
+        Une API (Application Programming Interface) est un ensemble de "commandes" que le frontend
+        peut envoyer au serveur. Par exemple, quand vous cliquez sur "Telecharger", le frontend
+        envoie une requete <code>POST /api/download</code> avec l'URL de la video. Le serveur
+        repond avec un identifiant de job pour suivre la progression.
+    </div>
+
+    <!-- ======================= -->
+    <!-- FLUX TELECHARGEMENT     -->
+    <!-- ======================= -->
+    <h2 id="flux-telechargement">Flux de telechargement pas a pas</h2>
+
+    <p>Voici exactement ce qui se passe quand vous collez une URL YouTube et cliquez sur "Telecharger" :</p>
+
+    <div class="step">
+        <div class="step-number">1</div>
+        <h4>L'utilisateur colle une URL</h4>
+        <p>Le frontend (app.js) detecte l'URL et envoie une requete au serveur pour recuperer les infos :</p>
+        <pre><code>POST /api/info
+Body: { "url": "https://youtube.com/watch?v=..." }</code></pre>
+        <p>Le serveur execute <code>yt-dlp --dump-json</code> et retourne le titre, la miniature, la duree, etc.</p>
+    </div>
+
+    <div class="step">
+        <div class="step-number">2</div>
+        <h4>L'utilisateur clique sur "Telecharger"</h4>
+        <p>Le frontend envoie :</p>
+        <pre><code>POST /api/download
+Body: { "url": "...", "type": "audio", "format": "mp3", "quality": "0", "cover": "1" }</code></pre>
+    </div>
+
+    <div class="step">
+        <div class="step-number">3</div>
+        <h4>Le serveur cree un job</h4>
+        <p>Le route <code>api/download.js</code> :</p>
+        <ul>
+            <li>Valide l'URL YouTube (verifie le format avec une regex)</li>
+            <li>Genere un identifiant unique : <code>yt_</code> + hash hexadecimal aleatoire</li>
+            <li>Sanitize les parametres (verifie que le format et la qualite sont valides)</li>
+            <li>Lance le worker en arriere-plan : <code>spawn('node', ['worker.js', ...])</code></li>
+            <li>Repond immediatement : <code>{ "success": true, "jobId": "yt_a1b2c3d4" }</code></li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <div class="step-number">4</div>
+        <h4>Le frontend surveille la progression</h4>
+        <p>Toutes les secondes, le frontend demande :</p>
+        <pre><code>GET /api/progress?id=yt_a1b2c3d4</code></pre>
+        <p>Le route <code>api/progress.js</code> lit le fichier <code>downloads/yt_a1b2c3d4.log</code>
+        et en extrait le pourcentage de progression. Reponse :</p>
+        <pre><code>{
+    "status": "progress",
+    "percent": 45,
+    "message": "Telechargement 45%..."
+}</code></pre>
+    </div>
+
+    <div class="step">
+        <div class="step-number">5</div>
+        <h4>Le telechargement se termine</h4>
+        <p>Le worker cree un fichier <code>yt_a1b2c3d4.done</code>. Au prochain sondage,
+        <code>api/progress.js</code> detecte ce fichier et repond :</p>
+        <pre><code>{
+    "status": "done",
+    "percent": 100,
+    "file": "downloads/Ma Super Chanson.mp3",
+    "cover": "downloads/Ma Super Chanson.jpg"
+}</code></pre>
+    </div>
+
+    <div class="step">
+        <div class="step-number">6</div>
+        <h4>Le fichier est disponible</h4>
+        <p>Le frontend affiche un lien de telechargement. Le fichier est accessible via :</p>
+        <pre><code>http://localhost:3000/downloads/Ma Super Chanson.mp3</code></pre>
+        <p>Le fichier est aussi ajoute a la bibliotheque locale et a l'historique.</p>
+    </div>
+
+    <div class="diagram" style="text-align: center;">
+        <span class="box">Navigateur</span>
+        <span class="arrow">&rarr;</span>
+        <span class="box-green">POST /api/download</span>
+        <span class="arrow">&rarr;</span>
+        <span class="box-orange">spawn worker.js</span>
+        <span class="arrow">&rarr;</span>
+        <span class="box-red">yt-dlp</span>
+        <br><br>
+        <span class="box">Navigateur</span>
+        <span class="arrow">&larr;</span>
+        <span class="box-green">GET /api/progress</span>
+        <span class="arrow">&larr;</span>
+        <span class="box-orange">Lit fichier .log</span>
+        <span class="arrow">&larr;</span>
+        <span class="box-red">Progression</span>
+        <br><br>
+        <span class="box">Navigateur</span>
+        <span class="arrow">&larr;</span>
+        <span class="box-green">GET /downloads/...</span>
+        <span class="arrow">&larr;</span>
+        <span class="box" style="background:#1a2a1a; border-color:#4caf50;">Fichier final .mp3/.mp4</span>
+    </div>
+
+    <!-- ======================= -->
+    <!-- FRONTEND                -->
+    <!-- ======================= -->
+    <h2 id="frontend">L'interface web (frontend)</h2>
+
+    <p>
+        L'interface est une application web classique composee de 3 fichiers dans le dossier <code>public/</code> :
+    </p>
+
+    <table>
+        <tr><th>Fichier</th><th>Taille</th><th>Role</th></tr>
+        <tr><td><code>index.html</code></td><td>~1 fichier</td><td>Structure de la page (HTML)</td></tr>
+        <tr><td><code>css/style.css</code></td><td>~45 Ko</td><td>Apparence visuelle (couleurs, mise en page)</td></tr>
+        <tr><td><code>js/app.js</code></td><td>~2600 lignes</td><td>Toute la logique interactive</td></tr>
+    </table>
+
+    <h3>Les onglets de l'interface :</h3>
+
+    <h4>1. Telechargement</h4>
+    <ul>
+        <li>Champ pour coller une URL YouTube</li>
+        <li>Apercu de la video (miniature, titre, duree)</li>
+        <li>Choix : Audio ou Video</li>
+        <li>Selection du format et de la qualite</li>
+        <li>Option pour sauvegarder la couverture</li>
+        <li>Barre de progression en temps reel</li>
+    </ul>
+
+    <h4>2. Recherche</h4>
+    <ul>
+        <li>Barre de recherche YouTube integree</li>
+        <li>Affiche les resultats avec miniatures</li>
+        <li>Clic pour telecharger directement</li>
+    </ul>
+
+    <h4>3. Bibliotheque</h4>
+    <ul>
+        <li>Liste de tous les fichiers telecharges</li>
+        <li>Organisation en dossiers personnalises</li>
+        <li>Lecture directe dans le navigateur</li>
+        <li>Suppression de fichiers</li>
+        <li>Detection des doublons</li>
+    </ul>
+
+    <h4>4. Profil</h4>
+    <ul>
+        <li>Profils utilisateurs multiples</li>
+        <li>Preferences par defaut (format, qualite)</li>
+        <li>Historique des telechargements</li>
+        <li>Compteur de telechargements</li>
+    </ul>
+
+    <h3>Fonctionnalites supplementaires :</h3>
+    <ul>
+        <li><strong>Theme sombre/clair</strong> - Bascule enregistree dans le navigateur</li>
+        <li><strong>File d'attente</strong> - Ajoutez plusieurs videos, elles se telechargent une par une</li>
+        <li><strong>Notifications</strong> - Alerte quand un telechargement est termine</li>
+        <li><strong>Support des playlists</strong> - Telechargez toute une playlist en un clic</li>
+    </ul>
+
+    <!-- ======================= -->
+    <!-- DONNEES                 -->
+    <!-- ======================= -->
+    <h2 id="donnees">Stockage des donnees</h2>
+
+    <p>
+        Le programme utilise de simples fichiers JSON pour stocker ses donnees. Pas de base de donnees
+        complexe, juste des fichiers texte que Node.js lit et ecrit.
+    </p>
+
+    <h3>library.json - La bibliotheque</h3>
+    <pre><code>{
+    "folders": [
+        {
+            "id": "folder_abc123",
+            "name": "Mes musiques",
+            "date": "2026-04-07 14:30:00"
+        }
+    ],
+    "items": [
+        {
+            "id": "item_def456",
+            "file": "downloads/Ma Chanson.mp3",
+            "title": "Ma Chanson",
+            "type": "audio",
+            "format": "mp3",
+            "folder": "folder_abc123",
+            "thumbnail": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+            "channel": "Artiste",
+            "duration": "3:45",
+            "url": "https://youtube.com/watch?v=...",
+            "cover": "downloads/Ma Chanson.jpg",
+            "date": "2026-04-07 14:30:00"
+        }
+    ]
+}</code></pre>
+
+    <h3>queue.json - La file d'attente</h3>
+    <pre><code>[
+    {
+        "url": "https://youtube.com/watch?v=...",
+        "title": "Video en attente",
+        "type": "audio",
+        "format": "mp3",
+        "quality": "0",
+        "status": "waiting",
+        "percent": 0,
+        "jobId": null
+    }
+]</code></pre>
+
+    <h3>history.json - L'historique</h3>
+    <p>Liste des 200 derniers telechargements avec date, titre, format, etc.</p>
+
+    <h3>profiles.json - Les profils</h3>
+    <p>Chaque profil stocke le nom, les preferences par defaut et le nombre de telechargements.</p>
+
+    <!-- ======================= -->
+    <!-- EXTENSION               -->
+    <!-- ======================= -->
+    <h2 id="extension">Extension navigateur</h2>
+
+    <p>
+        Le dossier <code>extension/</code> contient une extension compatible Chrome, Edge et Brave.
+        Elle ajoute des boutons de telechargement directement sur les pages YouTube.
+    </p>
+
+    <h3>Comment l'installer :</h3>
+    <ol>
+        <li>Ouvrez votre navigateur (Chrome/Edge/Brave)</li>
+        <li>Allez dans les parametres d'extensions :
+            <ul>
+                <li>Chrome : <code>chrome://extensions</code></li>
+                <li>Edge : <code>edge://extensions</code></li>
+            </ul>
+        </li>
+        <li>Activez le <strong>"Mode developpeur"</strong> (bouton en haut a droite)</li>
+        <li>Cliquez sur <strong>"Charger l'extension non empaquetee"</strong></li>
+        <li>Selectionnez le dossier <code>extension/</code> du projet</li>
+    </ol>
+
+    <h3>Ce que fait l'extension :</h3>
+    <ul>
+        <li>Ajoute un bouton de telechargement flottant sur les pages YouTube</li>
+        <li>Ajoute un bouton inline a cote des likes/dislikes</li>
+        <li>Panneau d'options pour choisir format/qualite sans quitter YouTube</li>
+        <li>Suivi de la progression directement sur la page YouTube</li>
+        <li>Fonctionne sur les videos, les shorts et les playlists</li>
+    </ul>
+
+    <div class="warning-box">
+        <strong>Prerequis de l'extension</strong>
+        Le serveur (<code>node server.js</code>) doit etre lance pour que l'extension fonctionne.
+        L'extension envoie les requetes a <code>http://localhost:3000</code>.
+    </div>
+
+    <!-- ======================= -->
+    <!-- API REFERENCE           -->
+    <!-- ======================= -->
+    <h2 id="api-reference">Reference API complete</h2>
+
+    <table>
+        <tr>
+            <th>Route</th>
+            <th>Methode</th>
+            <th>Description</th>
+            <th>Parametres principaux</th>
+        </tr>
+        <tr>
+            <td><code>/api/info</code></td>
+            <td>POST</td>
+            <td>Recupere les infos d'une video</td>
+            <td><code>{ url }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/download</code></td>
+            <td>POST</td>
+            <td>Lance un telechargement</td>
+            <td><code>{ url, type, format, quality, cover }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/progress</code></td>
+            <td>GET</td>
+            <td>Verifie la progression</td>
+            <td><code>?id=yt_xxx</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/search</code></td>
+            <td>GET</td>
+            <td>Recherche YouTube</td>
+            <td><code>?q=mot-cle&max=10</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/playlist</code></td>
+            <td>POST</td>
+            <td>Liste les videos d'une playlist</td>
+            <td><code>{ url }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/queue</code></td>
+            <td>POST</td>
+            <td>Gere la file d'attente</td>
+            <td><code>{ action: "list|add|remove|clear" }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/library</code></td>
+            <td>POST</td>
+            <td>Gere la bibliotheque locale</td>
+            <td><code>{ action: "list|add_item|delete_item|create_folder|..." }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/profile</code></td>
+            <td>POST</td>
+            <td>Gere les profils utilisateurs</td>
+            <td><code>{ action: "list|save|load|logout" }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/history</code></td>
+            <td>POST</td>
+            <td>Historique des telechargements</td>
+            <td><code>{ action: "list|add|clear" }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/notifications</code></td>
+            <td>POST</td>
+            <td>Gere les notifications</td>
+            <td><code>{ action: "list|add|clear" }</code></td>
+        </tr>
+        <tr>
+            <td><code>/api/system</code></td>
+            <td>POST</td>
+            <td>Infos systeme, mise a jour yt-dlp</td>
+            <td><code>{ action: "info|update" }</code></td>
+        </tr>
+    </table>
+
+    <!-- ======================= -->
+    <!-- FORMATS                 -->
+    <!-- ======================= -->
+    <h2 id="formats">Formats supportes</h2>
+
+    <h3>Audio</h3>
+    <table>
+        <tr><th>Format</th><th>Description</th><th>Qualite</th><th>Taille typique (4 min)</th></tr>
+        <tr><td><code>MP3</code></td><td>Le plus universel, compatible partout</td><td>Bonne (compresse avec pertes)</td><td>~4-8 Mo</td></tr>
+        <tr><td><code>FLAC</code></td><td>Sans perte de qualite</td><td>Excellente (sans pertes)</td><td>~25-40 Mo</td></tr>
+        <tr><td><code>WAV</code></td><td>Audio brut non compresse</td><td>Maximale (aucune compression)</td><td>~40-60 Mo</td></tr>
+        <tr><td><code>AAC</code></td><td>Successeur du MP3, meilleur ratio qualite/taille</td><td>Tres bonne</td><td>~3-6 Mo</td></tr>
+        <tr><td><code>OGG</code></td><td>Format libre (Vorbis)</td><td>Bonne</td><td>~3-6 Mo</td></tr>
+    </table>
+
+    <h3>Niveaux de qualite audio</h3>
+    <table>
+        <tr><th>Valeur</th><th>Signification</th><th>Usage</th></tr>
+        <tr><td><code>0</code></td><td>Meilleure qualite possible</td><td>Ecoute hi-fi, archivage</td></tr>
+        <tr><td><code>5</code></td><td>Qualite moyenne</td><td>Ecoute quotidienne</td></tr>
+        <tr><td><code>9</code></td><td>Qualite basse (fichier leger)</td><td>Economie d'espace disque</td></tr>
+    </table>
+
+    <h3>Video</h3>
+    <table>
+        <tr><th>Format</th><th>Description</th><th>Compatibilite</th></tr>
+        <tr><td><code>MP4</code></td><td>Le plus universel</td><td>Tous les appareils et lecteurs</td></tr>
+        <tr><td><code>MKV</code></td><td>Conteneur flexible (Matroska)</td><td>PC, VLC, certains TV</td></tr>
+        <tr><td><code>WEBM</code></td><td>Format web de Google</td><td>Navigateurs, VLC</td></tr>
+    </table>
+
+    <h3>Resolutions video</h3>
+    <table>
+        <tr><th>Valeur</th><th>Resolution</th><th>Nom courant</th><th>Taille typique (4 min)</th></tr>
+        <tr><td><code>best</code></td><td>Meilleure disponible</td><td>Depend de la video</td><td>Variable</td></tr>
+        <tr><td><code>1080</code></td><td>1920x1080</td><td>Full HD</td><td>~100-200 Mo</td></tr>
+        <tr><td><code>720</code></td><td>1280x720</td><td>HD</td><td>~50-100 Mo</td></tr>
+        <tr><td><code>480</code></td><td>854x480</td><td>SD</td><td>~30-60 Mo</td></tr>
+        <tr><td><code>360</code></td><td>640x360</td><td>Basse def</td><td>~15-30 Mo</td></tr>
+    </table>
+
+    <!-- ======================= -->
+    <!-- DEPANNAGE               -->
+    <!-- ======================= -->
+    <h2 id="depannage">Depannage</h2>
+
+    <h3>Le programme ne se lance pas</h3>
+    <div class="error-box">
+        <strong>Erreur : 'node' n'est pas reconnu</strong>
+        Node.js n'est pas installe ou pas dans le PATH. Relancez <code>start.bat</code> ou installez manuellement.
+    </div>
+
+    <div class="error-box">
+        <strong>Erreur : 'python' n'est pas reconnu</strong>
+        Python n'est pas installe. Relancez <code>start.bat</code> ou installez depuis python.org
+        (n'oubliez pas de cocher "Add to PATH").
+    </div>
+
+    <div class="error-box">
+        <strong>Erreur : Cannot find module 'express'</strong>
+        Les dependances ne sont pas installees. Lancez <code>npm install</code> dans le dossier du projet.
+    </div>
+
+    <h3>Le telechargement echoue</h3>
+    <div class="error-box">
+        <strong>Erreur : ffmpeg non trouve</strong>
+        Installez ffmpeg via <code>winget install Gyan.FFmpeg</code> puis fermez et rouvrez le terminal.
+    </div>
+
+    <div class="error-box">
+        <strong>Erreur : "Video unavailable" ou "Sign in to confirm"</strong>
+        Certaines videos sont protegees par YouTube. yt-dlp ne peut pas toujours les telecharger.
+        Essayez de mettre a jour yt-dlp via l'interface (onglet systeme) ou manuellement :
+        <code>python -m pip install -U yt-dlp</code>
+    </div>
+
+    <div class="error-box">
+        <strong>Le telechargement reste bloque a 0%</strong>
+        Verifiez que yt-dlp est installe : <code>python -m yt_dlp --version</code>.
+        Si ca ne fonctionne pas, reinstallez : <code>python -m pip install yt-dlp</code>.
+    </div>
+
+    <h3>L'extension ne fonctionne pas</h3>
+    <div class="warning-box">
+        <strong>Le serveur doit tourner</strong>
+        L'extension communique avec <code>http://localhost:3000</code>. Assurez-vous que le serveur est lance
+        (<code>node server.js</code> ou <code>start.bat</code>) avant d'utiliser l'extension.
+    </div>
+
+    <h3>Commandes utiles pour diagnostiquer</h3>
+    <pre><code># Verifier que tout est installe :
+node --version          &larr; doit afficher v20+
+python --version        &larr; doit afficher 3.12+
+python -m yt_dlp --version   &larr; doit afficher 2024.x.x+
+ffmpeg -version         &larr; doit afficher la version
+
+# Mettre a jour yt-dlp :
+python -m pip install -U yt-dlp
+
+# Reinstaller les dependances Node.js :
+rm -rf node_modules
+npm install</code></pre>
+
+    <br><br>
+    <hr style="border-color: #333;">
+    <p style="text-align: center; color: #555; margin-top: 20px;">
+        YouTube Downloader Node - Documentation technique v1.0
+    </p>
+
+</div>
+
+</body>
+</html>

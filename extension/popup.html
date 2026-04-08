@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 320px; background: #1a1a1a; color: #fff; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+.header { background: #ff0000; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+.header .logo { width: 28px; height: 28px; background: #fff; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.header .logo::after { content: ''; border-left: 10px solid #ff0000; border-top: 6px solid transparent; border-bottom: 6px solid transparent; margin-left: 2px; }
+.header span { font-weight: 700; font-size: 14px; }
+.content { padding: 16px; }
+.status { padding: 12px; border-radius: 8px; margin-bottom: 12px; text-align: center; font-size: 12px; display: none; }
+.status.ok { display: block; background: #0a2e0a; border: 1px solid #2d7a2d; color: #4caf50; }
+.status.err { display: block; background: #2e0a0a; border: 1px solid #7a2d2d; color: #f44; }
+.status.wait { display: block; background: #1a1a2e; border: 1px solid #2d2d7a; color: #88f; }
+.url-box { background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.url-box.active { border-color: #ff0000; color: #fff; }
+.row { display: flex; gap: 8px; margin-bottom: 10px; }
+select { flex: 1; padding: 8px 10px; background: #111; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 12px; cursor: pointer; outline: none; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23888' d='M5 7L1 3h8z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+.type-row { display: flex; background: #111; border: 1px solid #333; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.type-row label { flex: 1; text-align: center; padding: 8px; cursor: pointer; font-size: 12px; font-weight: 600; color: #888; transition: all 0.2s; }
+.type-row input { display: none; }
+.type-row input:checked + label { background: #ff0000; color: #fff; }
+.btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-bottom: 6px; }
+.btn-dl { background: #ff0000; color: #fff; }
+.btn-dl:hover { background: #cc0000; }
+.btn-queue { background: #333; color: #aaa; }
+.btn-queue:hover { background: #444; color: #fff; }
+.btn:disabled { opacity: 0.5; cursor: wait; }
+.footer { padding: 8px 16px; border-top: 1px solid #2a2a2a; text-align: center; }
+.footer a { color: #888; text-decoration: none; font-size: 11px; }
+.footer a:hover { color: #ff0000; }
+.check-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; color: #aaa; font-size: 12px; }
+.check-row input { accent-color: #ff0000; width: 14px; height: 14px; }
+</style>
+</head>
+<body>
+<div class="header"><div class="logo"></div><span>YouTube Downloader</span></div>
+<div class="content">
+  <div class="status" id="status"></div>
+  <div class="url-box" id="urlBox">Aucune video detectee</div>
+  <div class="type-row">
+    <input type="radio" name="type" id="tAudio" value="audio" checked><label for="tAudio">Audio</label>
+    <input type="radio" name="type" id="tVideo" value="video"><label for="tVideo">Video</label>
+  </div>
+  <div class="row"><select id="format"></select><select id="quality"></select></div>
+  <div class="check-row"><input type="checkbox" id="cover"><label for="cover">Couverture (image)</label></div>
+  <button class="btn btn-dl" id="btnDl" disabled>Telecharger</button>
+  <button class="btn btn-queue" id="btnQueue" disabled>+ Ajouter a la file d'attente</button>
+</div>
+<div class="footer"><a href="http://127.0.0.1:3000/" target="_blank">Ouvrir l'application</a></div>
+<script src="popup.js"></script>
+</body>
+</html>
