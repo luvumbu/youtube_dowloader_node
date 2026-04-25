@@ -115,6 +115,16 @@ router.all('/', async (req, res) => {
             break;
         }
 
+        case 'toggle_like': {
+            const itemId = req.body.item_id || '';
+            const item = lib.items.find(i => i.id === itemId);
+            if (!item) return res.json({ success: false });
+            item.liked = !item.liked;
+            saveLib(lib);
+            res.json({ success: true, liked: item.liked });
+            break;
+        }
+
         case 'delete_item': {
             const itemId = req.body.item_id || '';
             const item = lib.items.find(i => i.id === itemId);

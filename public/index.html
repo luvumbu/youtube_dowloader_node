@@ -3,8 +3,46 @@
 <head>
 <meta charset="UTF-8">
 <title>YouTube Downloader</title>
-<link rel="icon" href="youtube.ico" type="image/x-icon">
+<link id="favicon" rel="icon" href="youtube-blue.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/style.css">
+<script>
+(function() {
+    var keyColors = ['#1e88e5', '#4caf50', '#ff9800', '#e53935', '#9c27b0'];
+    var STEPS_BETWEEN = 20;      // nb de frames d'interpolation entre 2 couleurs
+    var FRAME_MS = 50;           // ms par frame -> transition fluide
+    function hexToRgb(h) {
+        h = h.replace('#', '');
+        return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+    }
+    function rgbToHex(r,g,b) {
+        return '#' + [r,g,b].map(function(v){ return Math.round(v).toString(16).padStart(2,'0'); }).join('');
+    }
+    function lerp(a,b,t) { return a + (b-a)*t; }
+    // Construire la palette interpolee
+    var palette = [];
+    for (var i = 0; i < keyColors.length; i++) {
+        var c1 = hexToRgb(keyColors[i]);
+        var c2 = hexToRgb(keyColors[(i+1) % keyColors.length]);
+        for (var s = 0; s < STEPS_BETWEEN; s++) {
+            var t = s / STEPS_BETWEEN;
+            palette.push(rgbToHex(lerp(c1[0],c2[0],t), lerp(c1[1],c2[1],t), lerp(c1[2],c2[2],t)));
+        }
+    }
+    // Pre-calculer les data URIs
+    var icons = palette.map(function(c) {
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+            + '<rect x="2" y="10" width="60" height="44" rx="12" ry="12" fill="' + c + '"/>'
+            + '<path d="M26 22 L44 32 L26 42 Z" fill="#ffffff"/></svg>'
+        );
+    });
+    var idx = 0;
+    var el = document.getElementById('favicon');
+    function rotate() { el.href = icons[idx]; idx = (idx + 1) % icons.length; }
+    rotate();
+    setInterval(rotate, FRAME_MS);
+})();
+</script>
 </head>
 <body>
 
@@ -25,6 +63,7 @@
         <div class="tab" onclick="switchTab('search')">Recherche</div>
         <div class="tab" onclick="switchTab('library')">Bibliotheque</div>
         <div class="tab" onclick="switchTab('flow')" ondragover="event.preventDefault(); this.classList.add('tab-dragover')" ondragleave="this.classList.remove('tab-dragover')" ondrop="this.classList.remove('tab-dragover'); flowDropOnTab(event)">Mon Flow</div>
+        <div class="tab" onclick="switchTab('stats')">Stats</div>
         <div class="tab" onclick="switchTab('profile')">Profil</div>
     </div>
 
@@ -133,6 +172,200 @@
             </div>
 
             <div id="searchResults"></div>
+        </div>
+    </div>
+
+    <!-- TAB STATS -->
+    <div class="tab-content" id="tab-stats">
+        <div class="stats-subtabs">
+            <button class="stats-subtab active" data-sub="data" onclick="setStatsSubtab('data')">Mes stats</button>
+            <button class="stats-subtab" data-sub="ephemeral" onclick="setStatsSubtab('ephemeral')">Ephemeres</button>
+            <button class="stats-subtab" data-sub="storage" onclick="setStatsSubtab('storage')">Stockage</button>
+            <button class="stats-subtab" data-sub="compare" onclick="setStatsSubtab('compare')">Comparatif</button>
+        </div>
+        <div class="profile-container stats-design-classic" id="statsContainer">
+            <div class="profile-card stats-section" data-section="data">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
+                    <h2 style="margin:0;">Mes statistiques d'ecoute</h2>
+                    <button onclick="loadProfileStats()" class="stats-refresh" title="Rafraichir">&#8635;</button>
+                </div>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Calcule a partir de l'historique et des lectures de Mon Flow.</p>
+
+                <div class="stats-controls">
+                    <div class="seg-group" id="statsViewSeg" role="tablist">
+                        <button class="seg-btn active" data-view="global" onclick="setStatsView('global')">Global</button>
+                        <button class="seg-btn" data-view="year" onclick="setStatsView('year')">Annee</button>
+                        <button class="seg-btn" data-view="month" onclick="setStatsView('month')">Mois</button>
+                        <button class="seg-btn" data-view="day" onclick="setStatsView('day')">Jour</button>
+                    </div>
+                    <div class="period-nav" id="periodNav">
+                        <button class="pn-btn" id="periodPrev" onclick="navStatsPeriod(-1)" title="Precedent">&#9664;</button>
+                        <span class="pn-label" id="periodLabel">-</span>
+                        <button class="pn-btn" id="periodNext" onclick="navStatsPeriod(1)" title="Suivant">&#9654;</button>
+                        <button class="pn-today" id="periodToday" onclick="navStatsToday()" title="Periode actuelle">Aujourd'hui</button>
+                    </div>
+                </div>
+
+                <div class="stats-controls" style="margin-top:10px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;color:var(--text-muted);">Style :</span>
+                        <div class="seg-group" id="statsDesignSeg">
+                            <button class="seg-btn active" data-design="classic" onclick="setStatsDesign('classic')">Classique</button>
+                            <button class="seg-btn" data-design="vibrant" onclick="setStatsDesign('vibrant')">Vibrant</button>
+                            <button class="seg-btn" data-design="line" onclick="setStatsDesign('line')">Ligne</button>
+                            <button class="seg-btn" data-design="heatmap" onclick="setStatsDesign('heatmap')">Heatmap</button>
+                            <button class="seg-btn" data-design="minimal" onclick="setStatsDesign('minimal')">Minimal</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-grid" id="profileStatsGrid" style="margin-top:14px;">
+                    <div class="stat-card">
+                        <div class="sc-num" id="statTotal">-</div>
+                        <div class="sc-label">Total evenements</div>
+                        <div class="sc-sub" id="statTotalSub" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="sc-num" id="statTopHour" style="font-size:22px;line-height:1.2;">-</div>
+                        <div class="sc-label" id="statTopLabel">Plus actif</div>
+                        <div class="sc-sub" id="statTopHourSub" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="sc-num" id="statTopArtist" style="font-size:18px;line-height:1.2;">-</div>
+                        <div class="sc-label">Artiste #1</div>
+                        <div class="sc-sub" id="statTopArtistSub" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="sc-num" id="statHourRange" style="font-size:18px;line-height:1.2;">-</div>
+                        <div class="sc-label" id="statRangeLabel">Plage</div>
+                        <div class="sc-sub" id="statHourRangeSub" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="data" style="margin-top:15px;">
+                <div class="chart-block" style="margin-top:0;">
+                    <div class="chart-title" id="chartMainTitle">Activite <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(clique sur une barre pour voir le detail ou zoomer)</span></div>
+                    <svg id="chartHours" class="chart-svg" viewBox="0 0 480 200" preserveAspectRatio="none"></svg>
+                    <div class="chart-x-axis" id="chartXAxis"></div>
+                </div>
+                <div id="hourDetailsPanel" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
+                        <h3 id="hourDetailsTitle" style="margin:0;font-size:14px;color:var(--text);"></h3>
+                        <div style="display:flex;gap:6px;">
+                            <button id="hourDrillDown" onclick="drillDownFromBucket()" style="display:none;background:var(--primary);color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;">Zoomer</button>
+                            <button onclick="closeHourDetails()" style="background:var(--border);color:var(--text-faint);border:none;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;">Fermer</button>
+                        </div>
+                    </div>
+                    <div id="hourDetailsList"></div>
+                </div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="data" style="margin-top:15px;">
+                <div class="chart-block" style="margin-top:0;">
+                    <div class="chart-title">Top 5 artistes <span id="topArtistScope" style="font-weight:400;color:var(--text-muted);font-size:11px;"></span></div>
+                    <div id="chartArtists" class="chart-bars-h"></div>
+                </div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="ephemeral">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
+                    <h2 style="margin:0;">Ecoutes ephemeres</h2>
+                    <button onclick="loadEphemeral()" class="stats-refresh" title="Rafraichir">&#8635;</button>
+                </div>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Musiques que tu as ecoutees en streaming depuis la recherche, mais que tu n'as <strong>jamais</strong> telechargees ni ajoutees a Mon Flow. Pratique pour identifier ce qui pourrait meriter un download.</p>
+
+                <div class="stats-grid" style="margin-bottom:14px;">
+                    <div class="stat-card">
+                        <div class="sc-num" id="ephemTotal">-</div>
+                        <div class="sc-label">Titres uniques</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="sc-num" id="ephemPlays">-</div>
+                        <div class="sc-label">Ecoutes au total</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="sc-num" id="ephemTopCount" style="font-size:22px;">-</div>
+                        <div class="sc-label">Plus ecoute (nb fois)</div>
+                        <div class="sc-sub" id="ephemTopTitle" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                    <input type="text" id="ephemSearch" placeholder="Rechercher dans les ephemeres..." oninput="filterEphemeral()" style="flex:1;min-width:150px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;">
+                    <select id="ephemSort" onchange="filterEphemeral()" class="sort-select">
+                        <option value="recent">Plus recent</option>
+                        <option value="oldest">Plus ancien</option>
+                        <option value="most">Plus ecoutes</option>
+                        <option value="title">Titre A-Z</option>
+                    </select>
+                </div>
+
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+                    <button onclick="ephemAddAllToFlow()" style="background:#9C27B0;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">+ Tout dans Mon Flow</button>
+                    <button onclick="ephemForgetAll()" style="background:var(--border);color:var(--text);border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;">&#128465; Tout oublier</button>
+                </div>
+
+                <div id="ephemList"></div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="storage" style="margin-top:15px;">
+                <h2 style="margin-top:0;">Stockage</h2>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">Choisis comment les donnees sont organisees sur disque.</p>
+
+                <div class="stats-controls" style="margin-bottom:12px;">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <span style="font-size:12px;color:var(--text-muted);">Strategie :</span>
+                        <div class="seg-group" id="strategySeg">
+                            <button class="seg-btn active" data-strategy="monthly" onclick="previewStrategy('monthly')" title="Un fichier par mois (recommande)">Mensuel</button>
+                            <button class="seg-btn" data-strategy="yearly" onclick="previewStrategy('yearly')" title="Un fichier par annee">Annuel</button>
+                            <button class="seg-btn" data-strategy="single" onclick="previewStrategy('single')" title="Tout dans un seul fichier">Fichier unique</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="strategyHelp" class="strategy-help"></div>
+
+                <div id="storageInfo" style="font-size:12px;color:var(--text);margin-bottom:12px;"></div>
+
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button onclick="reimportStats()" style="background:var(--primary);color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;">Re-importer depuis history + flow</button>
+                    <button onclick="loadStorageInfo()" style="background:var(--border);color:var(--text-faint);border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;">Rafraichir info</button>
+                </div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="compare">
+                <h2 style="margin-top:0;">Comparatif des methodes de stockage</h2>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Coche les criteres qui t'importent. Le programme calcule la strategie la plus optimisee pour ton usage.</p>
+
+                <div class="cmp-criteria" id="cmpCriteria">
+                    <label class="cmp-check"><input type="checkbox" data-crit="read_day" checked onchange="renderComparison()"> <span>Vitesse vue Jour</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="read_month" checked onchange="renderComparison()"> <span>Vitesse vue Mois</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="read_year" checked onchange="renderComparison()"> <span>Vitesse vue Annee</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="read_global" checked onchange="renderComparison()"> <span>Vitesse vue Global</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="write" checked onchange="renderComparison()"> <span>Vitesse d'ecriture</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="disk" checked onchange="renderComparison()"> <span>Espace disque</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="robust" checked onchange="renderComparison()"> <span>Robustesse</span></label>
+                    <label class="cmp-check"><input type="checkbox" data-crit="scaling" checked onchange="renderComparison()"> <span>Scalabilite long terme</span></label>
+                </div>
+
+                <div id="cmpWinner" class="cmp-winner"></div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="compare" style="margin-top:15px;">
+                <h2 style="margin-top:0;font-size:15px;">Comparaison par critere</h2>
+                <div id="cmpChart"></div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="compare" style="margin-top:15px;">
+                <h2 style="margin-top:0;font-size:15px;">Avantages / Inconvenients par strategie</h2>
+                <div class="cmp-grid" id="cmpProsCons"></div>
+            </div>
+
+            <div class="profile-card stats-section" data-section="compare" style="margin-top:15px;">
+                <h2 style="margin-top:0;font-size:15px;">Score global pondere</h2>
+                <div id="cmpRadial"></div>
+            </div>
         </div>
     </div>
 
@@ -275,6 +508,7 @@
             <button class="btn-small" style="background:var(--primary);color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowShowCreatePlaylist()">+ Nouvelle playlist</button>
             <button class="btn-small" style="background:var(--border);color:var(--text-faint);border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowAddByUrl()">+ Ajouter par URL</button>
             <button class="btn-small" style="background:#9C27B0;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowToggleSearch()">Rechercher sur YouTube</button>
+            <button class="btn-small" style="background:var(--border);color:var(--text-faint);border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowOpenTrash()" title="Voir les titres retires (conserves 24h)">&#128465; Corbeille</button>
         </div>
         <div id="flowYtSearch" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg-hover);border-radius:10px;border:1px solid var(--border);">
             <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -292,7 +526,7 @@
             <span class="flow-pl-chip active" onclick="flowFilterPlaylist('', this)">Tout</span>
         </div>
 
-        <div id="flowTrackCount" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;"></div>
+        <div id="flowTrackCount" class="flow-track-count"></div>
         <div id="flowList"></div>
     </div>
 
@@ -460,9 +694,15 @@
     <div class="sq-log-header">
         <span>Notifications</span>
         <div>
-            <button class="sq-btn-clear" onclick="sqClearLog()">Vider</button>
+            <button class="sq-btn-clear" onclick="sqContactMail()" title="Contacter contact@bokonzi.com">&#9993;</button>
+            <button class="sq-btn-clear" onclick="sqMarkAllRead()" title="Tout marquer comme lu">&#10003;&#10003;</button>
+            <button class="sq-btn-clear" onclick="sqClearLog()" title="Tout vider">Vider</button>
             <button class="sq-btn-clear" onclick="document.getElementById('sqLogPanel').classList.remove('active')">&times;</button>
         </div>
+    </div>
+    <div class="sq-log-tabs">
+        <button class="sq-log-tab active" data-tab="unread" onclick="sqSetLogTab('unread')">Non lus <span id="sqLogCountUnread" class="sq-log-count">0</span></button>
+        <button class="sq-log-tab" data-tab="read" onclick="sqSetLogTab('read')">Lus <span id="sqLogCountRead" class="sq-log-count">0</span></button>
     </div>
     <div class="sq-log-body" id="sqLogBody"></div>
 </div>

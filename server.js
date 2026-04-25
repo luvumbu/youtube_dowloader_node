@@ -59,6 +59,16 @@ loadRoute('/api/system', './api/system');
 loadRoute('/api/convert', './api/convert');
 loadRoute('/api/stream', './api/stream');
 loadRoute('/api/flow', './api/flow');
+loadRoute('/api/stats', './api/stats');
+
+try {
+    const statsModule = require('./api/stats');
+    if (statsModule && typeof statsModule.migrateOnce === 'function') {
+        statsModule.migrateOnce();
+    }
+} catch (e) {
+    console.error('stats: migration au demarrage echouee:', e.message);
+}
 
 // Page principale
 app.get('/', (req, res) => {

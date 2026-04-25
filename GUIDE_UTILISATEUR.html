@@ -1,0 +1,1408 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guide Utilisateur - YouTube Downloader Node v3</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+        --bg: #0f0f0f;
+        --bg-card: #1a1a1a;
+        --bg-card2: #212121;
+        --bg-code: #161616;
+        --border: #303030;
+        --text: #f1f1f1;
+        --text2: #aaa;
+        --text3: #717171;
+        --accent: #ff0000;
+        --accent2: #cc0000;
+        --blue: #3ea6ff;
+        --green: #2ba640;
+        --purple: #9C27B0;
+        --orange: #FF9800;
+    }
+
+    body {
+        font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 0;
+    }
+
+    /* ---- HEADER ---- */
+    .hero {
+        background: linear-gradient(135deg, #1a0000 0%, #0f0f0f 50%, #0a0a1a 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 60px 20px 50px;
+        text-align: center;
+    }
+    .hero h1 {
+        font-size: 2.4em;
+        font-weight: 700;
+        margin-bottom: 10px;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+        color: var(--text2);
+        font-size: 1.1em;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    .hero .version {
+        display: inline-block;
+        margin-top: 16px;
+        background: var(--accent);
+        color: #fff;
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 0.85em;
+        font-weight: 600;
+    }
+
+    /* ---- LAYOUT ---- */
+    .container {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 30px 20px 80px;
+    }
+
+    /* ---- TOC ---- */
+    .toc {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px 30px;
+        margin-bottom: 40px;
+    }
+    .toc h2 {
+        font-size: 1.2em;
+        margin-bottom: 14px;
+        color: var(--text);
+    }
+    .toc ol {
+        padding-left: 20px;
+    }
+    .toc li {
+        margin-bottom: 6px;
+    }
+    .toc a {
+        color: var(--blue);
+        text-decoration: none;
+        font-size: 0.95em;
+    }
+    .toc a:hover { text-decoration: underline; }
+
+    /* ---- SECTIONS ---- */
+    section {
+        margin-bottom: 50px;
+    }
+    section h2 {
+        font-size: 1.6em;
+        font-weight: 700;
+        margin-bottom: 6px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid var(--accent);
+        display: inline-block;
+    }
+    section h3 {
+        font-size: 1.15em;
+        font-weight: 600;
+        margin: 28px 0 10px;
+        color: var(--text);
+    }
+    section p, section li {
+        color: var(--text2);
+        font-size: 0.95em;
+    }
+    section ul, section ol {
+        padding-left: 22px;
+        margin: 8px 0 14px;
+    }
+    section li { margin-bottom: 5px; }
+    section li strong { color: var(--text); }
+
+    /* ---- CARDS ---- */
+    .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin: 16px 0;
+    }
+    .card.highlight {
+        border-left: 4px solid var(--accent);
+    }
+    .card.tip {
+        border-left: 4px solid var(--green);
+    }
+    .card.info {
+        border-left: 4px solid var(--blue);
+    }
+    .card.purple {
+        border-left: 4px solid var(--purple);
+    }
+
+    /* ---- SCREENSHOT PLACEHOLDERS ---- */
+    .screenshot {
+        background: var(--bg-card2);
+        border: 2px dashed var(--border);
+        border-radius: 12px;
+        padding: 30px 20px;
+        margin: 16px 0;
+        text-align: center;
+        color: var(--text3);
+        font-size: 0.9em;
+        position: relative;
+    }
+    .screenshot .icon {
+        font-size: 2em;
+        display: block;
+        margin-bottom: 8px;
+    }
+    .screenshot .label {
+        color: var(--text2);
+        font-weight: 600;
+        display: block;
+        margin-bottom: 4px;
+        font-size: 0.95em;
+    }
+    .screenshot img {
+        max-width: 100%;
+        border-radius: 8px;
+        margin-top: 10px;
+    }
+
+    /* ---- TABLES ---- */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 14px 0;
+        font-size: 0.9em;
+    }
+    th {
+        background: var(--bg-card2);
+        color: var(--text);
+        text-align: left;
+        padding: 10px 14px;
+        border-bottom: 2px solid var(--border);
+        font-weight: 600;
+    }
+    td {
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text2);
+    }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* ---- CODE / PRE ---- */
+    code {
+        background: var(--bg-code);
+        color: var(--blue);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-size: 0.88em;
+        font-family: 'Cascadia Code', 'Consolas', monospace;
+    }
+    pre {
+        background: var(--bg-code);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px 20px;
+        overflow-x: auto;
+        margin: 14px 0;
+        font-size: 0.85em;
+        line-height: 1.6;
+        color: var(--text2);
+        font-family: 'Cascadia Code', 'Consolas', monospace;
+    }
+
+    /* ---- TABS MOCKUP ---- */
+    .tabs-mock {
+        display: flex;
+        gap: 0;
+        margin: 16px 0;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+    }
+    .tabs-mock span {
+        flex: 1;
+        text-align: center;
+        padding: 12px 8px;
+        font-size: 0.9em;
+        font-weight: 600;
+        background: var(--bg-card);
+        color: var(--text3);
+        border-right: 1px solid var(--border);
+        cursor: default;
+        transition: all 0.2s;
+    }
+    .tabs-mock span:last-child { border-right: none; }
+    .tabs-mock span.active {
+        background: var(--bg-card2);
+        color: var(--text);
+        border-bottom: 3px solid var(--accent);
+    }
+
+    /* ---- UI MOCK ELEMENTS ---- */
+    .mock-input {
+        background: var(--bg-code);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 14px;
+        color: var(--text3);
+        font-size: 0.9em;
+        width: 100%;
+        margin: 8px 0;
+        font-family: inherit;
+    }
+    .mock-btn {
+        display: inline-block;
+        padding: 8px 20px;
+        border-radius: 8px;
+        font-size: 0.85em;
+        font-weight: 600;
+        border: none;
+        cursor: default;
+        margin: 4px 4px 4px 0;
+    }
+    .mock-btn.red { background: var(--accent); color: #fff; }
+    .mock-btn.green { background: var(--green); color: #fff; }
+    .mock-btn.blue { background: var(--blue); color: #000; }
+    .mock-btn.purple { background: var(--purple); color: #fff; }
+    .mock-btn.orange { background: var(--orange); color: #fff; }
+    .mock-btn.gray { background: #383838; color: var(--text2); }
+
+    .mock-chip {
+        display: inline-block;
+        padding: 5px 14px;
+        border-radius: 18px;
+        font-size: 0.82em;
+        font-weight: 600;
+        margin: 3px 3px;
+        cursor: default;
+    }
+    .mock-chip.active { background: var(--text); color: var(--bg); }
+    .mock-chip.default { background: var(--bg-card2); color: var(--text2); border: 1px solid var(--border); }
+
+    .mock-progress {
+        background: var(--bg-code);
+        border-radius: 6px;
+        height: 8px;
+        margin: 10px 0;
+        overflow: hidden;
+    }
+    .mock-progress .fill {
+        height: 100%;
+        border-radius: 6px;
+        background: linear-gradient(90deg, var(--accent), #ff4444);
+        width: 65%;
+    }
+
+    .mock-stat {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 18px;
+        min-width: 100px;
+        margin: 4px;
+    }
+    .mock-stat .num { font-size: 1.3em; font-weight: 700; color: var(--text); }
+    .mock-stat .lbl { font-size: 0.75em; color: var(--text3); margin-top: 2px; }
+
+    .stats-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin: 14px 0;
+    }
+
+    /* ---- PLAYER MOCK ---- */
+    .mock-player {
+        background: var(--bg-card2);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 18px;
+        margin: 16px 0;
+    }
+    .mock-player .seek {
+        background: #333;
+        height: 4px;
+        border-radius: 2px;
+        margin-bottom: 12px;
+        position: relative;
+    }
+    .mock-player .seek .dot {
+        position: absolute;
+        left: 35%;
+        top: -4px;
+        width: 12px;
+        height: 12px;
+        background: var(--accent);
+        border-radius: 50%;
+    }
+    .mock-player .seek .played {
+        height: 100%;
+        width: 35%;
+        background: var(--accent);
+        border-radius: 2px;
+    }
+    .mock-player .controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 0.9em;
+    }
+    .mock-player .controls .title { flex: 1; }
+    .mock-player .controls .title strong { color: var(--text); display: block; font-size: 0.95em; }
+    .mock-player .controls .title small { color: var(--text3); font-size: 0.8em; }
+    .mock-player .controls .btns span {
+        display: inline-block;
+        width: 32px;
+        height: 32px;
+        line-height: 32px;
+        text-align: center;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.08);
+        margin: 0 2px;
+        font-size: 0.85em;
+    }
+    .mock-player .controls .btns .play-btn {
+        background: var(--text);
+        color: var(--bg);
+        width: 38px;
+        height: 38px;
+        line-height: 38px;
+        font-size: 1em;
+    }
+
+    /* ---- FLOW DIAGRAM ---- */
+    .flow-diagram {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+        margin: 20px 0;
+    }
+    .flow-diagram .node {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 24px;
+        font-weight: 600;
+        font-size: 0.9em;
+        text-align: center;
+        min-width: 180px;
+    }
+    .flow-diagram .node.main { border-color: var(--accent); color: var(--accent); }
+    .flow-diagram .arrow {
+        font-size: 1.2em;
+        color: var(--text3);
+        padding: 4px 0;
+    }
+    .flow-diagram .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .flow-diagram .node.small {
+        font-size: 0.8em;
+        padding: 8px 14px;
+        min-width: 0;
+    }
+    .flow-diagram .node.small.dl { border-color: var(--accent); color: var(--accent); }
+    .flow-diagram .node.small.search { border-color: var(--blue); color: var(--blue); }
+    .flow-diagram .node.small.lib { border-color: var(--green); color: var(--green); }
+    .flow-diagram .node.small.flow { border-color: var(--purple); color: var(--purple); }
+    .flow-diagram .node.small.prof { border-color: var(--orange); color: var(--orange); }
+
+    /* ---- BADGES ---- */
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.75em;
+        font-weight: 700;
+        margin: 0 2px;
+    }
+    .badge.dl { background: #1e6e2e; color: #4caf50; }
+    .badge.flow { background: #4a148c; color: #ce93d8; }
+    .badge.audio { background: #1a237e; color: #7986cb; }
+    .badge.video { background: #004d40; color: #4db6ac; }
+
+    /* ---- STEP NUMBERS ---- */
+    .step {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        font-size: 0.85em;
+        margin-right: 8px;
+        flex-shrink: 0;
+    }
+
+    .step-list {
+        list-style: none;
+        padding: 0;
+    }
+    .step-list li {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 14px;
+        padding: 12px 16px;
+        background: var(--bg-card);
+        border-radius: 10px;
+        border: 1px solid var(--border);
+    }
+    .step-list li .content { flex: 1; }
+    .step-list li .content strong { color: var(--text); }
+
+    /* ---- FEATURE GRID ---- */
+    .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 14px;
+        margin: 16px 0;
+    }
+    .feature {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+    }
+    .feature .icon { font-size: 1.5em; margin-bottom: 8px; }
+    .feature h4 { font-size: 0.95em; margin-bottom: 4px; color: var(--text); }
+    .feature p { font-size: 0.83em; color: var(--text3); }
+
+    /* ---- EXTENSION MOCK ---- */
+    .ext-popup {
+        background: #1e1e1e;
+        border: 1px solid #444;
+        border-radius: 12px;
+        width: 320px;
+        margin: 16px auto;
+        overflow: hidden;
+    }
+    .ext-popup .ext-section {
+        padding: 14px 16px;
+    }
+    .ext-popup .ext-section.red { border-top: 3px solid var(--accent); }
+    .ext-popup .ext-section.purple { border-top: 3px solid var(--purple); background: #1a1025; }
+    .ext-popup .ext-section h4 { font-size: 0.9em; margin-bottom: 8px; }
+    .ext-popup .ext-section .row {
+        display: flex;
+        gap: 6px;
+        margin: 6px 0;
+    }
+    .ext-popup .ext-section select {
+        flex: 1;
+        background: #2a2a2a;
+        color: #ccc;
+        border: 1px solid #444;
+        border-radius: 6px;
+        padding: 6px 8px;
+        font-size: 0.8em;
+    }
+
+    /* ---- DIVIDER ---- */
+    hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 40px 0;
+    }
+
+    /* ---- FOOTER ---- */
+    .footer {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--text3);
+        font-size: 0.85em;
+        border-top: 1px solid var(--border);
+    }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 600px) {
+        .hero h1 { font-size: 1.6em; }
+        .container { padding: 16px 12px 60px; }
+        .tabs-mock span { font-size: 0.75em; padding: 10px 4px; }
+        .features { grid-template-columns: 1fr; }
+        .ext-popup { width: 100%; }
+    }
+
+    /* ---- SMOOTH SCROLL ---- */
+    html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+
+<!-- ============= HERO ============= -->
+<div class="hero">
+    <h1><span>YouTube</span> Downloader Node</h1>
+    <p>Guide complet pour comprendre et utiliser l'application</p>
+    <div class="version">v3 - Mon Flow Edition</div>
+</div>
+
+<div class="container">
+
+<!-- ============= TABLE OF CONTENTS ============= -->
+<nav class="toc">
+    <h2>Table des matieres</h2>
+    <ol>
+        <li><a href="#overview">Vue d'ensemble</a></li>
+        <li><a href="#install">Installation et lancement</a></li>
+        <li><a href="#download">Onglet Telecharger</a></li>
+        <li><a href="#search">Onglet Recherche</a></li>
+        <li><a href="#library">Onglet Bibliotheque</a></li>
+        <li><a href="#history">Historique des telechargements</a></li>
+        <li><a href="#flow">Onglet Mon Flow (Streaming)</a></li>
+        <li><a href="#profile">Onglet Profil</a></li>
+        <li><a href="#player">Le lecteur audio/video</a></li>
+        <li><a href="#extension">Extension Chrome</a></li>
+        <li><a href="#tips">Raccourcis et astuces</a></li>
+        <li><a href="#architecture">Architecture technique</a></li>
+    </ol>
+</nav>
+
+<!-- ============= 1. VUE D'ENSEMBLE ============= -->
+<section id="overview">
+    <h2>1. Vue d'ensemble</h2>
+
+    <p style="margin:14px 0;">YouTube Downloader Node est une application web locale qui tourne sur votre PC. Elle offre un ensemble complet d'outils pour telecharger, streamer et organiser du contenu YouTube.</p>
+
+    <div class="features">
+        <div class="feature">
+            <div class="icon">&#11015;</div>
+            <h4>Telecharger</h4>
+            <p>Videos et audios en MP3, FLAC, WAV, AAC, OGG, MP4, MKV, WEBM avec choix de qualite</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#9654;</div>
+            <h4>Streamer (Mon Flow)</h4>
+            <p>Ecouter directement depuis YouTube sans telecharger, comme un Spotify personnel</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#128193;</div>
+            <h4>Organiser</h4>
+            <p>Bibliotheque avec dossiers, filtres, tri, recherche et selection multiple</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#128269;</div>
+            <h4>Rechercher</h4>
+            <p>Recherche YouTube integree avec telechargement rapide et file d'attente</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#127925;</div>
+            <h4>Playlists</h4>
+            <p>Creer des playlists personnalisees pour organiser vos titres en streaming</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#128268;</div>
+            <h4>Extension Chrome</h4>
+            <p>Telecharger ou ajouter au Flow directement depuis YouTube</p>
+        </div>
+    </div>
+
+    <p style="margin-top:16px;">L'interface est divisee en <strong>5 onglets</strong> :</p>
+
+    <div class="tabs-mock">
+        <span class="active">Telecharger</span>
+        <span>Recherche</span>
+        <span>Bibliotheque</span>
+        <span>Mon Flow</span>
+        <span>Profil</span>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Page d'accueil</span>
+        Ouvrir l'application (http://localhost:3000) et capturer la page avec les 5 onglets.<br>
+        <em>Enregistrer dans <code>docs/screenshots/01-accueil.png</code></em>
+        <!-- <img src="docs/screenshots/01-accueil.png" alt="Page d'accueil"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 2. INSTALLATION ============= -->
+<section id="install">
+    <h2>2. Installation et lancement</h2>
+
+    <h3>Lancement rapide</h3>
+    <p>Double-cliquer sur <code>start.bat</code>. Le script fait tout automatiquement :</p>
+
+    <ul class="step-list">
+        <li>
+            <span class="step">1</span>
+            <div class="content"><strong>Verification Node.js</strong> &mdash; verifie que Node.js est installe sur le systeme</div>
+        </li>
+        <li>
+            <span class="step">2</span>
+            <div class="content"><strong>Detection des outils</strong> &mdash; detecte automatiquement Python, ffmpeg et yt-dlp</div>
+        </li>
+        <li>
+            <span class="step">3</span>
+            <div class="content"><strong>Installation auto</strong> &mdash; installe les dependances manquantes via <code>winget</code> ou <code>pip</code></div>
+        </li>
+        <li>
+            <span class="step">4</span>
+            <div class="content"><strong>Serveur</strong> &mdash; lance le serveur Express sur <code>http://localhost:3000</code></div>
+        </li>
+        <li>
+            <span class="step">5</span>
+            <div class="content"><strong>Navigateur</strong> &mdash; ouvre automatiquement la page dans votre navigateur</div>
+        </li>
+    </ul>
+
+    <div class="screenshot">
+        <span class="icon">&#128187;</span>
+        <span class="label">Capture : Terminal de lancement</span>
+        Lancer <code>start.bat</code> et capturer le terminal avec le message "Server running on port 3000".<br>
+        <em>Enregistrer dans <code>docs/screenshots/02-terminal.png</code></em>
+        <!-- <img src="docs/screenshots/02-terminal.png" alt="Terminal lancement"> -->
+    </div>
+
+    <h3>Elements de la barre superieure</h3>
+    <table>
+        <tr><th>Element</th><th>Position</th><th>Fonction</th></tr>
+        <tr><td>&#9728; / &#9790; Soleil / Lune</td><td>Haut gauche</td><td>Basculer entre theme clair et sombre</td></tr>
+        <tr><td>&#128276; Cloche</td><td>Haut droite</td><td>Activer / desactiver les notifications du navigateur</td></tr>
+        <tr><td>Barre de bienvenue</td><td>Sous les onglets</td><td>Affiche le pseudo du profil connecte</td></tr>
+    </table>
+</section>
+
+<hr>
+
+<!-- ============= 3. ONGLET TELECHARGER ============= -->
+<section id="download">
+    <h2>3. Onglet Telecharger</h2>
+
+    <p>C'est l'onglet principal. Il permet de telecharger une video ou un audio depuis une URL YouTube.</p>
+
+    <h3>Etape 1 : Coller l'URL</h3>
+    <p>Collez une URL YouTube dans le champ de saisie :</p>
+
+    <div class="mock-input">https://www.youtube.com/watch?v=dQw4w9WgXcQ</div>
+
+    <div class="card info">
+        <strong>URLs acceptees :</strong>
+        <ul style="margin-top:6px;">
+            <li><code>https://www.youtube.com/watch?v=...</code></li>
+            <li><code>https://youtu.be/...</code></li>
+            <li><code>https://www.youtube.com/shorts/...</code></li>
+            <li>URLs de playlists YouTube</li>
+        </ul>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Champ URL</span>
+        Coller une URL YouTube dans le champ et capturer avant de lancer.<br>
+        <em>Enregistrer dans <code>docs/screenshots/03-url-input.png</code></em>
+        <!-- <img src="docs/screenshots/03-url-input.png" alt="Champ URL"> -->
+    </div>
+
+    <h3>Etape 2 : Choisir les options</h3>
+    <p>Cliquer sur la barre d'options pour derouler le panneau de configuration :</p>
+
+    <div class="card">
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+            <span class="mock-btn red" style="padding:6px 18px;">&#9673; Audio</span>
+            <span class="mock-btn gray" style="padding:6px 18px;">&#9675; Video</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+            <span style="background:#2a2a2a;padding:6px 14px;border-radius:6px;border:1px solid #444;color:#aaa;font-size:0.85em;">Format: MP3</span>
+            <span style="background:#2a2a2a;padding:6px 14px;border-radius:6px;border:1px solid #444;color:#aaa;font-size:0.85em;">Qualite: Meilleure</span>
+        </div>
+        <div style="margin-bottom:8px;">
+            <span style="background:#2a2a2a;padding:6px 14px;border-radius:6px;border:1px solid #444;color:#aaa;font-size:0.85em;">Dossier: Aucun dossier</span>
+        </div>
+        <div style="color:#aaa;font-size:0.85em;">
+            &#9744; Telecharger aussi la couverture (image)
+        </div>
+    </div>
+
+    <table>
+        <tr><th>Type</th><th>Formats disponibles</th><th>Qualites</th></tr>
+        <tr><td><span class="badge audio">Audio</span></td><td>MP3, FLAC, WAV, AAC, OGG</td><td>Meilleure / Moyenne / Basse</td></tr>
+        <tr><td><span class="badge video">Video</span></td><td>MP4, MKV, WEBM</td><td>Meilleure / 1080p / 720p / 480p / 360p</td></tr>
+    </table>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Options de telechargement</span>
+        Deployer le panneau d'options et capturer les selecteurs.<br>
+        <em>Enregistrer dans <code>docs/screenshots/04-options.png</code></em>
+        <!-- <img src="docs/screenshots/04-options.png" alt="Options de telechargement"> -->
+    </div>
+
+    <h3>Etape 3 : Lancer le telechargement</h3>
+    <p>Cliquez sur <strong>"Telecharger"</strong>. L'application :</p>
+    <ol>
+        <li>Recupere les infos de la video (titre, miniature, chaine, vues)</li>
+        <li>Affiche une <strong>carte video</strong> avec ces informations</li>
+        <li>Lance le telechargement en arriere-plan via un worker</li>
+        <li>Affiche une <strong>barre de progression</strong> en temps reel</li>
+    </ol>
+
+    <div class="card" style="display:flex;gap:14px;align-items:center;">
+        <div style="width:120px;height:68px;background:#222;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#555;font-size:0.8em;flex-shrink:0;">miniature</div>
+        <div style="flex:1;">
+            <div style="font-weight:600;font-size:0.95em;">Never Gonna Give You Up</div>
+            <div style="font-size:0.8em;color:#717171;">Rick Astley &bull; 1,4B vues &bull; 2009 &bull; &#10084; 15M</div>
+        </div>
+    </div>
+
+    <div style="margin:10px 0;">
+        <div style="display:flex;justify-content:space-between;font-size:0.82em;color:#717171;margin-bottom:4px;">
+            <span>Telechargement en cours...</span>
+            <span>65%</span>
+        </div>
+        <div class="mock-progress"><div class="fill"></div></div>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Telechargement en cours</span>
+        Lancer un telechargement et capturer quand la barre est a ~50%.<br>
+        <em>Enregistrer dans <code>docs/screenshots/05-progress.png</code></em>
+        <!-- <img src="docs/screenshots/05-progress.png" alt="Telechargement en cours"> -->
+    </div>
+
+    <h3>File d'attente</h3>
+    <p>Le bouton <span class="mock-btn gray" style="font-size:0.8em;">+ Ajouter a la file d'attente</span> permet d'empiler plusieurs telechargements. Ils sont traites un par un.</p>
+</section>
+
+<hr>
+
+<!-- ============= 4. ONGLET RECHERCHE ============= -->
+<section id="search">
+    <h2>4. Onglet Recherche</h2>
+
+    <p>Permet de chercher des videos sur YouTube directement sans quitter l'application.</p>
+
+    <h3>Comment rechercher</h3>
+    <ol>
+        <li>Taper un terme dans la barre de recherche</li>
+        <li>Cliquer sur <strong>"Rechercher"</strong></li>
+        <li>Les resultats s'affichent sous forme de cartes (jusqu'a 50 resultats)</li>
+    </ol>
+
+    <div style="display:flex;gap:6px;margin:12px 0;">
+        <div class="mock-input" style="flex:1;margin:0;">Stromae Papaoutai</div>
+        <span class="mock-btn red">Rechercher</span>
+    </div>
+
+    <h3>Actions par resultat</h3>
+    <p>Chaque carte de resultat affiche des boutons d'action :</p>
+
+    <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+        <div style="width:160px;height:90px;background:#222;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#555;font-size:0.75em;flex-shrink:0;">miniature</div>
+        <div style="flex:1;min-width:180px;">
+            <div style="font-weight:600;font-size:0.93em;">Stromae - Papaoutai</div>
+            <div style="font-size:0.8em;color:#717171;">Stromae &bull; 1,2B vues &bull; 3:32</div>
+            <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap;">
+                <span class="mock-btn red" style="font-size:0.75em;padding:4px 10px;">DL</span>
+                <span class="mock-btn orange" style="font-size:0.75em;padding:4px 10px;">+Queue</span>
+                <span class="mock-btn purple" style="font-size:0.75em;padding:4px 10px;">+Flow</span>
+                <span class="mock-btn blue" style="font-size:0.75em;padding:4px 10px;">Video</span>
+            </div>
+        </div>
+    </div>
+
+    <table>
+        <tr><th>Bouton</th><th>Action</th></tr>
+        <tr><td><span class="mock-btn red" style="font-size:0.7em;padding:3px 8px;">DL</span></td><td>Telecharge directement dans le format choisi</td></tr>
+        <tr><td><span class="mock-btn orange" style="font-size:0.7em;padding:3px 8px;">+Queue</span></td><td>Ajoute a la file d'attente de recherche</td></tr>
+        <tr><td><span class="mock-btn purple" style="font-size:0.7em;padding:3px 8px;">+Flow</span></td><td>Ajoute le titre a Mon Flow (streaming)</td></tr>
+        <tr><td><span class="mock-btn blue" style="font-size:0.7em;padding:3px 8px;">Video</span></td><td>Ouvre un apercu video en overlay</td></tr>
+    </table>
+
+    <h3>Badges</h3>
+    <p>Des badges colorees indiquent si la video est deja dans votre collection :</p>
+    <ul>
+        <li><span class="badge dl">DL</span> &mdash; la video est deja dans votre bibliotheque</li>
+        <li><span class="badge flow">Flow</span> &mdash; la video est deja dans Mon Flow</li>
+    </ul>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Resultats de recherche</span>
+        Faire une recherche et capturer les resultats avec les boutons DL, +Queue, +Flow, Video.<br>
+        <em>Enregistrer dans <code>docs/screenshots/06-search.png</code></em>
+        <!-- <img src="docs/screenshots/06-search.png" alt="Resultats de recherche"> -->
+    </div>
+
+    <h3>File d'attente de recherche</h3>
+    <p>Quand vous ajoutez des elements via <strong>+Queue</strong>, un panneau apparait avec :</p>
+    <ul>
+        <li>Le compteur d'elements dans la file</li>
+        <li>Une barre de progression globale</li>
+        <li>Le statut de chaque telechargement (en attente, en cours, termine, erreur)</li>
+        <li>Boutons pour vider les termines ou tout supprimer</li>
+    </ul>
+
+    <h3>Barre de statut</h3>
+    <div class="card tip">
+        Quand vous quittez l'onglet Recherche pendant un telechargement, une <strong>barre de statut</strong> apparait en bas de l'ecran. Cliquer dessus vous ramene directement a l'onglet Recherche.
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 5. BIBLIOTHEQUE ============= -->
+<section id="library">
+    <h2>5. Onglet Bibliotheque</h2>
+
+    <p>Le gestionnaire de fichiers complet. Il affiche tous vos telechargements organises.</p>
+
+    <h3>Statistiques</h3>
+    <p>En haut de la page, 5 cartes affichent les statistiques de votre collection :</p>
+
+    <div class="stats-row">
+        <div class="mock-stat"><span class="num">42</span><span class="lbl">Total</span></div>
+        <div class="mock-stat"><span class="num">30</span><span class="lbl">Audio</span></div>
+        <div class="mock-stat"><span class="num">12</span><span class="lbl">Video</span></div>
+        <div class="mock-stat"><span class="num">2.1 Go</span><span class="lbl">Espace disque</span></div>
+        <div class="mock-stat"><span class="num">4h 32m</span><span class="lbl">Duree totale</span></div>
+    </div>
+
+    <h3>Recherche et tri</h3>
+    <ul>
+        <li><strong>Barre de recherche</strong> : filtrer par titre, chaine ou format</li>
+        <li><strong>Tri</strong> : Date (recent/ancien), Titre (A-Z/Z-A), Type (audio/video d'abord), Taille (grand/petit)</li>
+        <li><strong>Filtres chips</strong> : apparaissent dynamiquement pour filtrer par type et format</li>
+    </ul>
+
+    <div style="display:flex;gap:6px;margin:10px 0;flex-wrap:wrap;">
+        <span class="mock-chip active">Tout</span>
+        <span class="mock-chip default">Audio</span>
+        <span class="mock-chip default">Video</span>
+        <span class="mock-chip default">MP3</span>
+        <span class="mock-chip default">MP4</span>
+        <span class="mock-chip default">FLAC</span>
+    </div>
+
+    <h3>Dossiers</h3>
+    <p>Organisez vos fichiers dans des dossiers :</p>
+    <ul>
+        <li>Cliquer sur <span class="mock-btn green" style="font-size:0.8em;padding:4px 12px;">+ Nouveau dossier</span> pour creer un dossier</li>
+        <li>Les dossiers apparaissent comme des chips cliquables</li>
+        <li>Cliquer sur un chip pour filtrer par dossier</li>
+    </ul>
+
+    <div style="display:flex;gap:6px;margin:10px 0;flex-wrap:wrap;">
+        <span class="mock-chip active">Tout</span>
+        <span class="mock-chip default">Rap FR</span>
+        <span class="mock-chip default">Chill</span>
+        <span class="mock-chip default">Workout</span>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Bibliotheque</span>
+        Capturer la bibliotheque avec les statistiques, dossiers et fichiers.<br>
+        <em>Enregistrer dans <code>docs/screenshots/07-library.png</code></em>
+        <!-- <img src="docs/screenshots/07-library.png" alt="Bibliotheque"> -->
+    </div>
+
+    <h3>Actions par fichier</h3>
+    <table>
+        <tr><th>Action</th><th>Description</th></tr>
+        <tr><td>&#11015; Telecharger</td><td>Telecharge le fichier sur votre PC</td></tr>
+        <tr><td>&#9654; Lecture</td><td>Lance la lecture audio ou video</td></tr>
+        <tr><td>&#128260; Convertir</td><td>Convertit une video en audio (MP3, FLAC, WAV, AAC, OGG)</td></tr>
+        <tr><td>&#128193; Deplacer</td><td>Deplace le fichier vers un autre dossier</td></tr>
+        <tr><td>&#10005; Supprimer</td><td>Supprime le fichier (avec confirmation)</td></tr>
+    </table>
+
+    <h3>Selection multiple</h3>
+    <p>Cliquer sur un fichier pour le selectionner. Des boutons d'actions groupees apparaissent :</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;">
+        <span class="mock-btn gray" style="font-size:0.8em;">&#9745; Tout selectionner</span>
+        <span class="mock-btn blue" style="font-size:0.8em;">&#9654; Lire la selection</span>
+        <span class="mock-btn red" style="font-size:0.8em;">&#10005; Supprimer la selection</span>
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 6. HISTORIQUE ============= -->
+<section id="history">
+    <h2>6. Historique des telechargements</h2>
+
+    <div class="card info">
+        Accessible depuis la <strong>Bibliotheque</strong> via le bouton <span class="mock-btn gray" style="font-size:0.75em;padding:3px 10px;">Historique</span>
+    </div>
+
+    <p>L'historique conserve les <strong>200 derniers telechargements</strong> avec titre, URL, format, chaine, miniature et date.</p>
+
+    <h3>Filtres</h3>
+    <ul>
+        <li><strong>Recherche textuelle</strong> par titre</li>
+        <li><strong>Tri</strong> : Date, Titre, Type</li>
+        <li><strong>Presence</strong> :</li>
+    </ul>
+
+    <div style="display:flex;gap:6px;margin:8px 0;">
+        <span class="mock-chip active">Tous</span>
+        <span class="mock-chip default">Presents</span>
+        <span class="mock-chip default">Absents</span>
+    </div>
+
+    <ul>
+        <li><strong>"Presents"</strong> : fichiers encore dans la bibliotheque</li>
+        <li><strong>"Absents"</strong> : fichiers supprimes (possibilite de re-telecharger)</li>
+    </ul>
+
+    <h3>Re-telechargement en lot</h3>
+    <ol>
+        <li>Cocher les elements souhaites (ou "Tout cocher")</li>
+        <li>Choisir un format (MP3, MP4, ou "Format d'origine")</li>
+        <li>Cliquer sur <span class="mock-btn green" style="font-size:0.8em;padding:4px 10px;">Re-telecharger la selection</span></li>
+        <li>L'application telecharge avec un delai de 3s entre chaque (protection anti-rate-limit)</li>
+    </ol>
+
+    <h3>Import / Export</h3>
+    <div style="display:flex;gap:6px;margin:8px 0;">
+        <span class="mock-btn blue" style="font-size:0.8em;">Exporter la liste</span>
+        <span class="mock-btn orange" style="font-size:0.8em;">Importer une liste</span>
+    </div>
+    <p>Sauvegardez votre historique en JSON ou importez un historique precedemment exporte.</p>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Historique</span>
+        Ouvrir l'historique et capturer avec les filtres et les options de re-telechargement.<br>
+        <em>Enregistrer dans <code>docs/screenshots/08-history.png</code></em>
+        <!-- <img src="docs/screenshots/08-history.png" alt="Historique"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 7. MON FLOW ============= -->
+<section id="flow">
+    <h2>7. Onglet Mon Flow (Streaming)</h2>
+
+    <div class="card purple">
+        <strong>Mon Flow</strong> est un lecteur de streaming qui lit la musique/video directement depuis YouTube <strong>sans telecharger</strong>. C'est votre Spotify personnel.
+    </div>
+
+    <h3>7 facons d'ajouter des titres</h3>
+    <table>
+        <tr><th>Methode</th><th>Description</th></tr>
+        <tr><td><span class="mock-btn green" style="font-size:0.7em;padding:3px 8px;">+ Depuis l'historique</span></td><td>Importe des titres depuis votre historique</td></tr>
+        <tr><td><span class="mock-btn purple" style="font-size:0.7em;padding:3px 8px;">Rechercher sur YouTube</span></td><td>Recherche integree dans l'onglet Mon Flow</td></tr>
+        <tr><td><span class="mock-btn gray" style="font-size:0.7em;padding:3px 8px;">+ Ajouter par URL</span></td><td>Coller directement une URL YouTube</td></tr>
+        <tr><td>Glisser-deposer</td><td>Drag & drop depuis l'historique ou la recherche vers l'onglet</td></tr>
+        <tr><td><span class="mock-btn purple" style="font-size:0.7em;padding:3px 8px;">+Flow</span></td><td>Depuis les resultats de recherche (onglet Recherche)</td></tr>
+        <tr><td>Extension Chrome</td><td>Bouton dedie "+F" sur les pages YouTube</td></tr>
+        <tr><td><span class="mock-btn orange" style="font-size:0.7em;padding:3px 8px;">Importer</span></td><td>Charger un fichier JSON</td></tr>
+    </table>
+
+    <h3>Playlists</h3>
+    <ul>
+        <li>Cliquer sur <span class="mock-btn red" style="font-size:0.8em;padding:4px 10px;">+ Nouvelle playlist</span> pour creer une playlist</li>
+        <li>Les playlists apparaissent comme des chips avec un bouton lecture</li>
+        <li>Cliquer pour filtrer, bouton lecture pour tout jouer</li>
+    </ul>
+
+    <div style="display:flex;gap:6px;margin:10px 0;flex-wrap:wrap;align-items:center;">
+        <span class="mock-chip active">Tout</span>
+        <span class="mock-chip default">&#9654; Chill Vibes</span>
+        <span class="mock-chip default">&#9654; Workout</span>
+        <span class="mock-chip default">&#9654; Rap FR</span>
+    </div>
+
+    <h3>Lecteur Mon Flow</h3>
+    <p>Quand un titre est en lecture, un lecteur apparait en haut de l'onglet :</p>
+
+    <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="width:56px;height:42px;background:#333;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.6em;color:#555;">img</div>
+        <div style="flex:1;min-width:150px;">
+            <div style="font-weight:600;font-size:0.9em;">Stromae - Papaoutai</div>
+            <div style="font-size:0.78em;color:#717171;">Stromae &bull; 3:32</div>
+        </div>
+        <div style="display:flex;gap:4px;">
+            <span class="mock-btn gray" style="font-size:0.75em;padding:4px 8px;">&#9664;&#9664;</span>
+            <span class="mock-btn gray" style="font-size:0.75em;padding:4px 8px;">&#9654;&#9654;</span>
+            <span class="mock-btn gray" style="font-size:0.75em;padding:4px 8px;">&#128256;</span>
+            <span class="mock-btn red" style="font-size:0.75em;padding:4px 8px;">&#9632;</span>
+        </div>
+    </div>
+
+    <h3>Tri et filtres</h3>
+    <ul>
+        <li><strong>Recherche</strong> dans Mon Flow par titre</li>
+        <li><strong>Format</strong> : choisir entre audio (MP3, FLAC...) et video (MP4...)</li>
+        <li><strong>Tri</strong> : Ajout recent/ancien, Titre A-Z/Z-A, Artiste A-Z, Plus/moins ecoutes, Audio/Video d'abord</li>
+    </ul>
+
+    <div class="card tip">
+        Chaque titre affiche un <strong>compteur de lectures</strong> : le nombre de fois que le titre a ete joue.
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Mon Flow</span>
+        Ajouter 5-6 titres et capturer la vue avec la barre de recherche, les playlists et les titres.<br>
+        <em>Enregistrer dans <code>docs/screenshots/09-flow.png</code></em>
+        <!-- <img src="docs/screenshots/09-flow.png" alt="Mon Flow"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 8. PROFIL ============= -->
+<section id="profile">
+    <h2>8. Onglet Profil</h2>
+
+    <h3>Connexion</h3>
+    <p>Au premier lancement, choisissez un profil existant ou creez-en un nouveau :</p>
+
+    <div class="card" style="max-width:350px;margin:14px auto;text-align:center;">
+        <h4 style="margin-bottom:10px;">Mon Profil</h4>
+        <p style="font-size:0.85em;color:#717171;margin-bottom:14px;">Choisis ton profil ou cree-en un nouveau</p>
+        <div style="border-top:1px solid #303030;padding-top:12px;margin-top:10px;">
+            <div class="mock-input" style="text-align:left;">Ton pseudo...</div>
+            <span class="mock-btn red" style="margin-top:6px;">Creer</span>
+        </div>
+    </div>
+
+    <h3>Preferences par defaut</h3>
+    <p>Une fois connecte, configurez vos preferences qui seront appliquees automatiquement :</p>
+
+    <table>
+        <tr><th>Preference</th><th>Options</th></tr>
+        <tr><td>Type prefere</td><td>Audio / Video</td></tr>
+        <tr><td>Format audio</td><td>MP3, FLAC, WAV, AAC, OGG</td></tr>
+        <tr><td>Qualite audio</td><td>Meilleure, Moyenne, Basse</td></tr>
+        <tr><td>Format video</td><td>MP4, MKV, WEBM</td></tr>
+        <tr><td>Qualite video</td><td>Meilleure, 1080p, 720p, 480p, 360p</td></tr>
+        <tr><td>Couverture</td><td>Toujours telecharger l'image</td></tr>
+    </table>
+
+    <h3>Cache</h3>
+    <p>Section affichant les statistiques du cache. Le cache reduit les appels a YouTube en gardant les resultats en memoire.</p>
+    <div style="display:flex;gap:6px;margin:8px 0;">
+        <span class="mock-btn red" style="font-size:0.8em;">Vider le cache</span>
+        <span class="mock-btn gray" style="font-size:0.8em;">Rafraichir</span>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Profil</span>
+        Se connecter et capturer la page de preferences.<br>
+        <em>Enregistrer dans <code>docs/screenshots/10-profile.png</code></em>
+        <!-- <img src="docs/screenshots/10-profile.png" alt="Profil"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 9. LECTEUR ============= -->
+<section id="player">
+    <h2>9. Le lecteur audio/video</h2>
+
+    <p>Un <strong>lecteur persistant</strong> est fixe en bas de l'ecran quand un fichier est en lecture. Il reste visible quel que soit l'onglet actif.</p>
+
+    <div class="mock-player">
+        <div class="seek">
+            <div class="played"></div>
+            <div class="dot"></div>
+        </div>
+        <div class="controls">
+            <div style="width:44px;height:44px;background:#333;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.6em;color:#555;">img</div>
+            <div class="title">
+                <strong>Never Gonna Give You Up</strong>
+                <small>Rick Astley</small>
+            </div>
+            <div style="font-size:0.82em;color:#717171;white-space:nowrap;">1:15 / 3:33</div>
+            <div class="btns">
+                <span>&#9776;</span>
+                <span>&#9198;</span>
+                <span class="play-btn">&#9654;</span>
+                <span>&#9197;</span>
+                <span>&#8634;</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;font-size:0.85em;">
+                <span>&#128266;</span>
+                <div style="width:60px;height:4px;background:#333;border-radius:2px;position:relative;">
+                    <div style="width:80%;height:100%;background:#fff;border-radius:2px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3>Controles</h3>
+    <table>
+        <tr><th>Bouton</th><th>Fonction</th></tr>
+        <tr><td>&#9654; / &#10074;&#10074;</td><td>Lecture / Pause</td></tr>
+        <tr><td>&#9198;</td><td>Morceau precedent dans la file</td></tr>
+        <tr><td>&#9197;</td><td>Morceau suivant dans la file</td></tr>
+        <tr><td>&#9776;</td><td>Activer la lecture aleatoire (shuffle)</td></tr>
+        <tr><td>&#8634;</td><td>Boucler toute la file de lecture</td></tr>
+        <tr><td>&#8635;</td><td>Boucler le morceau en cours</td></tr>
+        <tr><td>&#128266;</td><td>Volume (curseur 0-100%)</td></tr>
+        <tr><td>&#9776; (droite)</td><td>Afficher / masquer la file de lecture</td></tr>
+        <tr><td>&#10005;</td><td>Arreter et fermer le lecteur</td></tr>
+    </table>
+
+    <div class="card tip">
+        <strong>Astuce :</strong> Cliquer n'importe ou sur la barre de progression pour sauter a ce point du morceau.
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Lecteur</span>
+        Lancer un morceau et capturer la barre de lecture fixe en bas de l'ecran.<br>
+        <em>Enregistrer dans <code>docs/screenshots/11-player.png</code></em>
+        <!-- <img src="docs/screenshots/11-player.png" alt="Lecteur"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 10. EXTENSION ============= -->
+<section id="extension">
+    <h2>10. Extension Chrome</h2>
+
+    <p>L'extension Chrome permet d'interagir avec l'application directement depuis les pages YouTube.</p>
+
+    <h3>Installation</h3>
+    <ul class="step-list">
+        <li>
+            <span class="step">1</span>
+            <div class="content">Ouvrir Chrome et aller dans <code>chrome://extensions/</code></div>
+        </li>
+        <li>
+            <span class="step">2</span>
+            <div class="content">Activer le <strong>Mode developpeur</strong> (interrupteur en haut a droite)</div>
+        </li>
+        <li>
+            <span class="step">3</span>
+            <div class="content">Cliquer sur <strong>"Charger l'extension non empaquetee"</strong></div>
+        </li>
+        <li>
+            <span class="step">4</span>
+            <div class="content">Selectionner le dossier <code>extension_v2/</code> du projet</div>
+        </li>
+    </ul>
+
+    <h3>Popup de l'extension</h3>
+    <p>Cliquer sur l'icone de l'extension ouvre un popup avec deux sections :</p>
+
+    <div class="ext-popup">
+        <div class="ext-section red">
+            <h4 style="color:#ff4444;">&#11015; Telecharger</h4>
+            <div class="row">
+                <select><option>Audio</option></select>
+                <select><option>MP3</option></select>
+                <select><option>Meilleure</option></select>
+            </div>
+            <div style="font-size:0.8em;color:#888;margin:4px 0;">&#9744; Couverture</div>
+            <div class="row">
+                <span class="mock-btn red" style="flex:1;text-align:center;font-size:0.8em;">Telecharger</span>
+                <span class="mock-btn gray" style="font-size:0.8em;">+File</span>
+            </div>
+        </div>
+        <div class="ext-section purple">
+            <h4 style="color:#ce93d8;">&#9654; Mon Flow</h4>
+            <div class="row">
+                <select style="flex:1;"><option>Choisir une playlist...</option></select>
+                <span class="mock-btn purple" style="font-size:0.8em;padding:6px 8px;">+</span>
+            </div>
+            <div class="row" style="margin-top:4px;">
+                <span class="mock-btn purple" style="flex:1;text-align:center;font-size:0.8em;">Ajouter au Flow</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Popup extension</span>
+        Sur une video YouTube, cliquer sur l'extension et capturer le popup.<br>
+        <em>Enregistrer dans <code>docs/screenshots/12-extension-popup.png</code></em>
+        <!-- <img src="docs/screenshots/12-extension-popup.png" alt="Extension popup"> -->
+    </div>
+
+    <h3>Boutons flottants sur YouTube</h3>
+    <p>Sur chaque page YouTube, 3 boutons flottants apparaissent a droite de l'ecran :</p>
+
+    <table>
+        <tr><th>Bouton</th><th>Couleur</th><th>Action</th></tr>
+        <tr><td>&#9654; Lecture</td><td>Gris</td><td>Telecharge la video en cours</td></tr>
+        <tr><td>+F</td><td>Violet</td><td>Ajoute rapidement a Mon Flow</td></tr>
+        <tr><td>&#9776; Menu</td><td>Gris</td><td>Ouvre un panneau d'options avancees</td></tr>
+    </table>
+
+    <h3>Bouton inline "DL"</h3>
+    <p>Un bouton <span class="mock-btn red" style="font-size:0.7em;padding:2px 8px;">DL</span> apparait a cote du bouton "J'aime" sous chaque video YouTube.</p>
+
+    <h3>Support des playlists YouTube</h3>
+    <div class="card highlight">
+        Sur une page playlist YouTube, une banniere speciale apparait avec :<br>
+        <span class="mock-btn red" style="font-size:0.8em;margin-top:8px;">Download all</span>
+        <span class="mock-btn purple" style="font-size:0.8em;">+ Mon Flow</span>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Boutons flottants</span>
+        Sur une video YouTube, capturer les boutons flottants a droite de l'ecran.<br>
+        <em>Enregistrer dans <code>docs/screenshots/13-extension-fabs.png</code></em>
+        <!-- <img src="docs/screenshots/13-extension-fabs.png" alt="Boutons flottants"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 11. ASTUCES ============= -->
+<section id="tips">
+    <h2>11. Raccourcis et astuces</h2>
+
+    <div class="features">
+        <div class="feature">
+            <div class="icon">&#9728; / &#9790;</div>
+            <h4>Themes</h4>
+            <p>Cliquer sur l'icone soleil/lune pour basculer theme sombre/clair. Le choix est sauvegarde.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#128276;</div>
+            <h4>Notifications</h4>
+            <p>Activer la cloche pour recevoir une notification navigateur a chaque fin de telechargement.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#128070;</div>
+            <h4>Drag & Drop</h4>
+            <p>Glisser un titre vers l'onglet Mon Flow pour l'ajouter. Glisser des fichiers entre dossiers.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#127916;</div>
+            <h4>Overlay video</h4>
+            <p>Cliquer sur "Video" ouvre un lecteur YouTube en overlay sans quitter l'application.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#9881;</div>
+            <h4>Logs techniques</h4>
+            <p>Icone engrenage en bas a droite : ouvre un panneau de debug avec horodatage et niveaux.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">&#128260;</div>
+            <h4>Conversion rapide</h4>
+            <p>Dans la bibliotheque, convertir une video en audio (MP3, FLAC...) sans re-telecharger.</p>
+        </div>
+    </div>
+
+    <div class="screenshot">
+        <span class="icon">&#128247;</span>
+        <span class="label">Capture : Theme clair vs sombre</span>
+        Capturer l'application en theme sombre puis en theme clair (cote a cote si possible).<br>
+        <em>Enregistrer dans <code>docs/screenshots/14-themes.png</code></em>
+        <!-- <img src="docs/screenshots/14-themes.png" alt="Themes"> -->
+    </div>
+</section>
+
+<hr>
+
+<!-- ============= 12. ARCHITECTURE ============= -->
+<section id="architecture">
+    <h2>12. Architecture technique</h2>
+
+    <h3>Schema de navigation</h3>
+
+    <div class="flow-diagram">
+        <div class="node main">localhost:3000</div>
+        <div class="arrow">&#9660;</div>
+        <div class="row">
+            <div class="node small dl">Telecharger</div>
+            <div class="node small search">Recherche</div>
+            <div class="node small lib">Bibliotheque</div>
+            <div class="node small flow">Mon Flow</div>
+            <div class="node small prof">Profil</div>
+        </div>
+        <div class="arrow">&#9660;</div>
+        <div class="row">
+            <div class="node small" style="border-color:#555;color:#aaa;">URL + Options</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Search YouTube</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Stats + Dossiers</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Playlists</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Preferences</div>
+        </div>
+        <div class="arrow">&#9660;</div>
+        <div class="row">
+            <div class="node small" style="border-color:#555;color:#aaa;">Progression</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">DL / Queue / +Flow</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Historique</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Streaming</div>
+            <div class="node small" style="border-color:#555;color:#aaa;">Cache</div>
+        </div>
+    </div>
+
+    <h3>Architecture serveur</h3>
+    <pre>
+Navigateur (localhost:3000)           Extension Chrome
+        |                                    |
+        v                            (CORS via background.js)
++------------------+                         |
+|   Express.js     |&lt;------------------------+
+|   server.js      |
++--------+---------+
+         |
+   12 routes API :
+   info, download, progress, library, queue,
+   notifications, profile, search, playlist,
+   history, convert, stream, flow, system
+         |
+    worker.js (telechargement en arriere-plan)
+         |
+    yt-dlp + ffmpeg
+         |
+    downloads/
+    </pre>
+
+    <h3>Stockage des donnees</h3>
+    <p>Toutes les donnees sont en JSON dans le dossier <code>data/</code> :</p>
+    <table>
+        <tr><th>Fichier</th><th>Contenu</th></tr>
+        <tr><td><code>library.json</code></td><td>Bibliotheque (dossiers + fichiers telecharges)</td></tr>
+        <tr><td><code>history.json</code></td><td>Historique des 200 derniers telechargements</td></tr>
+        <tr><td><code>flow.json</code></td><td>Titres et playlists Mon Flow</td></tr>
+        <tr><td><code>profiles.json</code></td><td>Profils utilisateurs et preferences</td></tr>
+        <tr><td><code>queue.json</code></td><td>File d'attente de telechargement</td></tr>
+        <tr><td><code>notifications.json</code></td><td>Notifications systeme (max 100)</td></tr>
+    </table>
+</section>
+
+<hr>
+
+<div class="card info" style="text-align:center;">
+    <strong>Pour ajouter les captures d'ecran :</strong><br>
+    <p style="margin-top:6px;">
+        Lancer l'application (<code>start.bat</code>), naviguer dans chaque section et utiliser <code>Win + Shift + S</code>.<br>
+        Enregistrer les images dans <code>docs/screenshots/</code> puis decommenter les balises <code>&lt;img&gt;</code> dans ce fichier.
+    </p>
+</div>
+
+</div>
+
+<div class="footer">
+    YouTube Downloader Node v3 &mdash; Guide Utilisateur<br>
+    Application locale &bull; Aucune donnee envoyee a des serveurs externes
+</div>
+
+</body>
+</html>

@@ -80,12 +80,16 @@ function switchTab(tab) {
     document.querySelector('.tab-content#tab-' + tab).classList.add('active');
     // Trouver le bon onglet a activer dans la barre
     document.querySelectorAll('.tab').forEach(t => {
-        const tabMap = { 'Telecharger': 'download', 'Recherche': 'search', 'Bibliotheque': 'library', 'Mon Flow': 'flow', 'Profil': 'profile' };
+        const tabMap = { 'Telecharger': 'download', 'Recherche': 'search', 'Bibliotheque': 'library', 'Mon Flow': 'flow', 'Stats': 'stats', 'Profil': 'profile' };
         if (tabMap[t.textContent] === tab) t.classList.add('active');
     });
     localStorage.setItem('yt_tab', tab);
     if (tab === 'flow') { loadFlow(); }
     if (tab === 'profile') { loadCacheStats(); }
+    if (tab === 'stats') {
+        const sub = localStorage.getItem('yt_stats_subtab') || 'data';
+        setStatsSubtab(sub);
+    }
     if (tab === 'library') { loadLibrary(); loadHistory(); loadSystemInfo(); }
 }
 
@@ -389,6 +393,7 @@ function buildFilterChips() {
     const items = libraryData.items || [];
     const audioCount = items.filter(i => i.type === 'audio').length;
     const videoCount = items.filter(i => i.type === 'video').length;
+    const likedCount = items.filter(i => i.liked).length;
     const formatCounts = {};
     items.forEach(i => {
         if (i.format) formatCounts[i.format] = (formatCounts[i.format] || 0) + 1;
@@ -399,6 +404,10 @@ function buildFilterChips() {
     html += '<label class="lib-filter-chip ' + (activeFilters.has('all') ? 'active' : '') + '">'
         + '<input type="checkbox" ' + (activeFilters.has('all') ? 'checked' : '') + ' onchange="toggleFilter(\'all\')">'
         + '<span class="chip-dot all"></span> Tout <span class="chip-count">(' + items.length + ')</span></label>';
+    // Aimés — toujours visible, mis en valeur
+    html += '<label class="lib-filter-chip lib-filter-liked ' + (activeFilters.has('liked') ? 'active' : '') + '">'
+        + '<input type="checkbox" ' + (activeFilters.has('liked') ? 'checked' : '') + ' onchange="toggleFilter(\'liked\')">'
+        + '<span class="chip-heart">&#10084;</span> Aim&eacute;s <span class="chip-count">(' + likedCount + ')</span></label>';
     // Audio
     if (audioCount > 0) {
         html += '<label class="lib-filter-chip ' + (activeFilters.has('audio') ? 'active' : '') + '">'
@@ -516,6 +525,7 @@ function renderLibrary() {
             + '<div class="item-actions">'
             + '<a class="item-dl" href="' + item.file.split('/').map(encodeURIComponent).join('/') + '" download>DL</a>'
             + (item.type === 'video' ? '<button class="item-move" onclick="convertToAudio(\'' + item.id + '\')" title="Extraire l\'audio">MP3</button>' : '')
+            + '<button class="item-like' + (item.liked ? ' liked' : '') + '" onclick="libToggleLike(\'' + item.id + '\', this)" title="' + (item.liked ? 'Retirer des aim&eacute;s' : 'Aimer') + '">' + (item.liked ? '&#10084;' : '&#9825;') + '</button>'
             + '<button class="item-move" onclick="showMoveItem(\'' + item.id + '\')">Deplacer</button>'
             + '<button class="item-del" onclick="deleteItem(\'' + item.id + '\')">Suppr</button>'
             + '</div></div></div>';
@@ -526,6 +536,29 @@ function renderLibrary() {
     computeDurationStats();
     // Afficher les boutons de selection des le chargement
     updateSelectCount();
+}
+
+async function libToggleLike(itemId, btn) {
+    console.log('[LIKE LIB] click id=', itemId);
+    try {
+        const resp = await fetch('api/library', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=toggle_like&item_id=' + encodeURIComponent(itemId)
+        });
+        const data = await resp.json();
+        console.log('[LIKE LIB] response', resp.status, data);
+        if (!data.success) { alert('Like refuse par le serveur : ' + (data.error || 'inconnu')); return; }
+        const item = libraryData.items.find(i => i.id === itemId);
+        if (item) item.liked = data.liked;
+        if (btn) {
+            btn.innerHTML = data.liked ? '&#10084;' : '&#9825;';
+            btn.classList.toggle('liked', !!data.liked);
+            btn.title = data.liked ? 'Retirer des aimés' : 'Aimer';
+        }
+        // Rafraichir compteur du chip Aimes + filtre si actif
+        buildFilterChips();
+        if (activeFilters.has('liked')) filterLibrary();
+    } catch (e) { console.error('[LIKE LIB] erreur reseau', e); alert('Erreur reseau: ' + e.message); }
 }
 
 function filterLibrary() {
@@ -545,6 +578,8 @@ function filterLibrary() {
             if (activeFilters.has(item.type)) matchFilter = true;
             // Verifier format (fmt:mp3, fmt:mp4, etc.)
             if (activeFilters.has('fmt:' + item.format)) matchFilter = true;
+            // Verifier aimes
+            if (activeFilters.has('liked') && item.liked) matchFilter = true;
         }
 
         const match = matchText && matchFilter;
@@ -737,8 +772,91 @@ document.getElementById('folderName').addEventListener('keydown', function(e) {
 let playlist = [];
 let playIndex = 0;
 let playMode = 'normal'; // normal, loop, loopOne, shuffle
+let playbackContext = 'library'; // 'library', 'flow', 'history'
 const audioEl = document.getElementById('audioEl');
 const videoEl = document.getElementById('videoEl');
+
+// --- Stream recovery / retry ---
+let _streamRetryCount = 0;
+const _streamMaxRetries = 3;
+let _streamRetrying = false;
+
+async function _streamRetry() {
+    if (_streamRetrying || playbackContext !== 'flow') return;
+    if (_streamRetryCount >= _streamMaxRetries) {
+        _streamRetryCount = 0;
+        console.warn('[Flow] Max retries reached, skipping to next');
+        flowNext('audio');
+        return;
+    }
+    _streamRetrying = true;
+    _streamRetryCount++;
+    const savedTime = audioEl.currentTime || 0;
+    console.log('[Flow] Stream retry #' + _streamRetryCount + ' from ' + savedTime.toFixed(1) + 's');
+
+    try {
+        const t = flowTracks[flowCurrentIdx];
+        if (!t || !t.url) { _streamRetrying = false; return; }
+        const resp = await fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + (flowCurrentType || 'audio'));
+        const data = await resp.json();
+        if (!data.success) { _streamRetrying = false; flowNext('audio'); return; }
+
+        audioEl.src = data.streamUrl;
+        audioEl.volume = document.getElementById('volumeSlider').value / 100;
+
+        audioEl.addEventListener('loadedmetadata', function _seekAfterRetry() {
+            audioEl.removeEventListener('loadedmetadata', _seekAfterRetry);
+            if (savedTime > 0 && savedTime < audioEl.duration) {
+                audioEl.currentTime = savedTime;
+            }
+            audioEl.play().catch(() => {});
+            _streamRetrying = false;
+        }, { once: true });
+
+        // Fallback si loadedmetadata ne fire pas
+        setTimeout(() => {
+            if (_streamRetrying) {
+                audioEl.play().catch(() => {});
+                _streamRetrying = false;
+            }
+        }, 5000);
+    } catch (e) {
+        console.error('[Flow] Retry failed:', e);
+        _streamRetrying = false;
+        flowNext('audio');
+    }
+}
+
+audioEl.addEventListener('error', () => {
+    if (playbackContext === 'flow' && flowCurrentIdx >= 0) {
+        console.warn('[Flow] Audio error, attempting retry...');
+        _streamRetry();
+    }
+});
+
+audioEl.addEventListener('stalled', () => {
+    if (playbackContext !== 'flow' || _streamRetrying) return;
+    // Attendre 8s, si toujours stalled, retry
+    setTimeout(() => {
+        if (audioEl.paused || _streamRetrying) return;
+        if (audioEl.readyState < 3) {
+            console.warn('[Flow] Stream stalled for too long, retrying...');
+            _streamRetry();
+        }
+    }, 8000);
+});
+
+audioEl.addEventListener('waiting', () => {
+    if (playbackContext !== 'flow' || _streamRetrying) return;
+    // Si waiting dure > 15s, c'est probablement mort
+    setTimeout(() => {
+        if (audioEl.paused || _streamRetrying) return;
+        if (audioEl.readyState < 3) {
+            console.warn('[Flow] Buffering too long, retrying...');
+            _streamRetry();
+        }
+    }, 15000);
+});
 
 // --- Persistance du lecteur ---
 function savePlayerState() {
@@ -753,14 +871,15 @@ function savePlayerState() {
                 currentTime: audioEl.currentTime || 0,
                 volume: audioEl.volume,
                 playing: !audioEl.paused,
-                shuffle: flowShuffle
+                shuffle: flowShuffle,
+                playbackContext: 'flow'
             }));
             localStorage.removeItem('player_state');
             return;
         }
         localStorage.removeItem('flow_state');
         localStorage.setItem('player_state', JSON.stringify({
-            playlist, playIndex, playMode,
+            playlist, playIndex, playMode, playbackContext,
             currentTime: audioEl.currentTime || 0,
             volume: audioEl.volume,
             playing: !audioEl.paused
@@ -785,6 +904,7 @@ function restorePlayerState() {
         playlist = state.playlist;
         playIndex = state.playIndex || 0;
         playMode = state.playMode || 'normal';
+        playbackContext = state.playbackContext || 'library';
 
         const item = getItemById(playlist[playIndex]);
         if (!item || item.type === 'video') return;
@@ -832,6 +952,7 @@ async function restoreFlowState(state) {
     flowCurrentIdx = idx;
     flowCurrentType = state.type || 'audio';
     flowShuffle = state.shuffle || false;
+    playbackContext = 'flow';
 
     // Afficher le player bar
     const bar = document.getElementById('playerBar');
@@ -937,6 +1058,7 @@ function playCurrentItem() {
     if (playIndex < 0 || playIndex >= playlist.length) return;
     const item = getItemById(playlist[playIndex]);
     if (!item) return;
+    playbackContext = 'library';
 
     if (item.type === 'video') {
         playVideo(item);
@@ -1043,8 +1165,15 @@ function playerToggle() {
 }
 
 function playerNext() {
-    // Si Mon Flow est actif, utiliser flowNext
-    if (flowCurrentIdx >= 0) { flowNext(); return; }
+    // Respecter le contexte de lecture actuel
+    if (playbackContext === 'flow' && flowCurrentIdx >= 0) { flowNext(); return; }
+    if (playbackContext === 'search' && searchPlayIdx >= 0) { searchPlayNext(); return; }
+    if (playbackContext === 'history' && currentStreamIdx >= 0) {
+        const type = document.getElementById('streamVideo').style.display === 'block' ? 'video' : 'audio';
+        playNextStream(currentStreamIdx, type);
+        return;
+    }
+    // Contexte library
     if (playlist.length === 0) return;
     if (playMode === 'loopOne') {
         audioEl.currentTime = 0; audioEl.play(); return;
@@ -1065,8 +1194,16 @@ function playerNext() {
 }
 
 function playerPrev() {
-    // Si Mon Flow est actif, utiliser flowPrev
-    if (flowCurrentIdx >= 0) { flowPrev(); return; }
+    // Respecter le contexte de lecture actuel
+    if (playbackContext === 'flow' && flowCurrentIdx >= 0) { flowPrev(); return; }
+    if (playbackContext === 'search' && searchPlayIdx >= 0) { searchPlayPrev(); return; }
+    if (playbackContext === 'history' && currentStreamIdx >= 0) {
+        const type = document.getElementById('streamVideo').style.display === 'block' ? 'video' : 'audio';
+        const prevIdx = getPrevStreamIdx(currentStreamIdx);
+        if (prevIdx !== -1) streamFromHistory(prevIdx, type);
+        return;
+    }
+    // Contexte library
     if (playlist.length === 0) return;
     // If more than 3s in, restart current track
     if (audioEl.currentTime > 3) {
@@ -1131,6 +1268,7 @@ function playerClose() {
     playlist = [];
     flowCurrentIdx = -1;
     flowPreloaded = null;
+    playbackContext = 'library';
     document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
     localStorage.removeItem('player_state');
     localStorage.removeItem('flow_state');
@@ -1324,6 +1462,990 @@ function showProfile() {
     document.getElementById('welcomeName').textContent = currentUser.username;
 }
 
+// ===== STATS (Global / Annee / Mois / Jour) =====
+let statsState = {
+    view: 'global', year: null, month: null, currentBucket: null,
+    design: localStorage.getItem('yt_stats_design') || 'classic',
+    availableMonths: [],
+    cache: null
+};
+
+const STATS_MONTH_NAMES = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
+const STATS_MONTH_SHORT = ['Jan','Fev','Mar','Avr','Mai','Juin','Juil','Aou','Sep','Oct','Nov','Dec'];
+
+function statsParseTs(s) {
+    if (!s) return null;
+    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    return { Y: +m[1], Mo: +m[2], D: +m[3], H: +m[4], Mi: +m[5] };
+}
+function statsFmtDateEU(p) { return `${String(p.D).padStart(2,'0')}/${String(p.Mo).padStart(2,'0')}/${p.Y}`; }
+function statsFmtTime(p) { return `${String(p.H).padStart(2,'0')}:${String(p.Mi).padStart(2,'0')}`; }
+
+const STRATEGY_DETAILS = {
+    monthly: {
+        icon: '&#128197;', name: 'Mensuel', recommended: true,
+        desc: 'Un fichier par mois civil. Quand tu consultes la vue Jour ou Mois, l\'app n\'ouvre que le fichier du mois concerne - tres rapide meme avec des annees de donnees.',
+        files: ['2026-04.json', '2026-03.json', '2026-02.json', '...', '2024-01.json'],
+        pros: [
+            '<span>Charge ~1 fichier</span> pour Jour/Mois, ~12 pour Annee',
+            '<span>Robuste</span> : si un fichier se corrompt, seul ce mois est perdu',
+            '<span>Taille bornee</span> : ~50-200 ko/mois meme avec gros usage'
+        ],
+        cons: [
+            '<span>Beaucoup de fichiers</span> a long terme (60+ apres 5 ans)',
+            'Vue Global lit tous les fichiers (mais reste rapide)'
+        ],
+        perf: { read_day: 0.95, read_month: 0.9, read_year: 0.7, read_global: 0.6, scaling: 0.95 }
+    },
+    yearly: {
+        icon: '&#128198;', name: 'Annuel',
+        desc: 'Un fichier par annee. Bon compromis entre simplicite et performance : moins de fichiers a gerer, mais chaque fichier grossit avec l\'annee qui passe.',
+        files: ['2026.json', '2025.json', '2024.json'],
+        pros: [
+            '<span>Tres peu de fichiers</span> (1 par annee)',
+            '<span>Vue Annee instantanee</span> : 1 fichier a lire',
+            'Plus simple a sauvegarder/exporter'
+        ],
+        cons: [
+            'Vue Jour scanne tout le fichier de l\'annee',
+            'Avec gros usage, un fichier peut atteindre plusieurs Mo',
+            'Si corruption : 1 annee entiere perdue'
+        ],
+        perf: { read_day: 0.65, read_month: 0.7, read_year: 0.95, read_global: 0.75, scaling: 0.7 }
+    },
+    single: {
+        icon: '&#128196;', name: 'Fichier unique',
+        desc: 'Un seul fichier "all.json" qui contient tous les evenements. Le plus simple a comprendre, mais l\'app doit le charger entierement a chaque requete.',
+        files: ['all.json'],
+        pros: [
+            '<span>Le plus simple</span> : 1 seul fichier a comprendre',
+            'Facile a partager/sauvegarder/diff',
+            'Aucune coordination multi-fichiers'
+        ],
+        cons: [
+            '<span>Ne scale pas</span> : tout est rechargse a chaque event',
+            'Risque de blocage en ecriture si 2 events arrivent en meme temps',
+            'Si corruption : <strong>tout est perdu</strong>'
+        ],
+        perf: { read_day: 0.4, read_month: 0.4, read_year: 0.45, read_global: 0.5, scaling: 0.25 }
+    }
+};
+
+function recordEphemeralListen(r) {
+    if (!r || !r.url) return;
+    const params = new URLSearchParams({
+        action: 'record', kind: 'stream', source: 'audio',
+        title: r.title || '', channel: r.channel || '', url: r.url, format: 'stream'
+    });
+    fetch('api/stats?' + params.toString()).catch(() => {});
+}
+
+function setStatsSubtab(sub) {
+    localStorage.setItem('yt_stats_subtab', sub);
+    document.querySelectorAll('.stats-subtab').forEach(b => {
+        b.classList.toggle('active', b.dataset.sub === sub);
+    });
+    document.querySelectorAll('.stats-section').forEach(s => {
+        s.classList.toggle('visible', s.dataset.section === sub);
+    });
+    if (sub === 'data') { loadProfileStats(); }
+    if (sub === 'storage') { loadStorageInfo(); }
+    if (sub === 'compare') { renderComparison(); }
+    if (sub === 'ephemeral') { loadEphemeral(); }
+    closeHourDetails();
+}
+
+let ephemeralCache = [];
+
+async function loadEphemeral() {
+    try {
+        const data = await statsApiCall('api/stats?action=ephemeral');
+        if (!data.success) return;
+        ephemeralCache = data.items || [];
+        document.getElementById('ephemTotal').textContent = data.total || 0;
+        document.getElementById('ephemPlays').textContent = data.totalStreams || 0;
+        if (ephemeralCache.length) {
+            const top = [...ephemeralCache].sort((a, b) => b.count - a.count)[0];
+            document.getElementById('ephemTopCount').textContent = top.count + 'x';
+            document.getElementById('ephemTopTitle').textContent = top.title || top.url;
+            document.getElementById('ephemTopTitle').title = top.title || top.url;
+        } else {
+            document.getElementById('ephemTopCount').textContent = '-';
+            document.getElementById('ephemTopTitle').textContent = 'Aucune ecoute ephemere';
+        }
+        filterEphemeral();
+    } catch (e) {
+        const list = document.getElementById('ephemList');
+        if (list) list.innerHTML = `<div style="color:var(--error);font-size:12px;padding:10px;background:var(--bg-hover);border-radius:8px;">${e.message}</div>`;
+    }
+}
+
+function filterEphemeral() {
+    const q = (document.getElementById('ephemSearch').value || '').toLowerCase().trim();
+    const sortBy = document.getElementById('ephemSort').value;
+    let items = ephemeralCache.slice();
+    if (q) items = items.filter(it =>
+        (it.title || '').toLowerCase().includes(q) || (it.artist || '').toLowerCase().includes(q)
+    );
+    if (sortBy === 'recent') items.sort((a, b) => String(b.lastTs).localeCompare(String(a.lastTs)));
+    else if (sortBy === 'oldest') items.sort((a, b) => String(a.lastTs).localeCompare(String(b.lastTs)));
+    else if (sortBy === 'most') items.sort((a, b) => b.count - a.count);
+    else if (sortBy === 'title') items.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    renderEphemeralList(items);
+}
+
+function renderEphemeralList(items) {
+    const list = document.getElementById('ephemList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:30px;">Aucun resultat. Tes ecoutes en streaming depuis la recherche apparaitront ici.</div>';
+        return;
+    }
+    const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+    const fmtDate = (ts) => {
+        const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+        return m ? `${m[3]}/${m[2]}/${m[1]} a ${m[4]}:${m[5]}` : '';
+    };
+    const vidFromUrl = (u) => { const m = (u || '').match(/[?&]v=([^&]+)|youtu\.be\/([^?&]+)/); return m ? (m[1] || m[2]) : ''; };
+
+    list.innerHTML = items.map((it, i) => {
+        const vid = vidFromUrl(it.url);
+        const thumb = vid ? `https://i.ytimg.com/vi/${vid}/mqdefault.jpg` : '';
+        const safeTitle = esc(it.title || '(sans titre)');
+        const safeArtist = it.artist ? esc(it.artist) : '';
+        return `<div class="ephem-row">
+            <div class="ephem-thumb">${thumb ? `<img src="${esc(thumb)}" alt="" onerror="this.style.display='none'">` : '&#127925;'}</div>
+            <div class="ephem-info">
+                <div class="ephem-title" title="${safeTitle}">${safeTitle}</div>
+                <div class="ephem-meta">${safeArtist ? safeArtist + ' &middot; ' : ''}<strong>${it.count}</strong> ecoute${it.count > 1 ? 's' : ''} &middot; dernier ${fmtDate(it.lastTs)}</div>
+            </div>
+            <div class="ephem-actions">
+                <button onclick="ephemAddToFlow(${i})" title="Ajouter a Mon Flow" class="ephem-btn ephem-btn-flow">+ Flow</button>
+                <button onclick="ephemDownload(${i})" title="Telecharger" class="ephem-btn ephem-btn-dl">DL</button>
+                ${it.url ? `<a href="${esc(it.url)}" target="_blank" class="ephem-btn ephem-btn-yt" title="Ouvrir sur YouTube">YT</a>` : ''}
+                <button onclick="ephemForget(${i})" title="Oublier ce titre (supprimer de la liste)" class="ephem-btn ephem-btn-forget">&times;</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function ephemAddAllToFlow() {
+    if (!ephemeralCache.length) { showToast('Aucun titre a ajouter'); return; }
+    const items = ephemeralCache.map(it => ({
+        url: it.url || '',
+        title: it.title || '',
+        channel: it.artist || '',
+        thumbnail: '',
+        duration: ''
+    }));
+    openAddBulkToFlow(items, async () => {
+        await fetch('api/stats?action=forget_ephemeral', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'urls=' + encodeURIComponent(JSON.stringify(ephemeralCache.map(it => it.url)))
+        }).catch(() => {});
+        loadEphemeral();
+    });
+}
+
+async function ephemForgetAll() {
+    if (!ephemeralCache.length) return;
+    if (!confirm('Effacer toutes les ' + ephemeralCache.length + ' ecoutes ephemeres de l\'historique ? Les evenements de type "stream" seront supprimes du stockage.')) return;
+    try {
+        await statsApiCall('api/stats?action=forget_ephemeral&all=1');
+        showToast('Historique ephemere efface');
+        loadEphemeral();
+    } catch (e) { alert(e.message); }
+}
+
+async function ephemForget(idx) {
+    const sorted = currentFilteredEphemeral();
+    const it = sorted[idx];
+    if (!it) return;
+    try {
+        const resp = await fetch('api/stats?action=forget_ephemeral', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'urls=' + encodeURIComponent(JSON.stringify([it.url]))
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Titre oublie');
+            loadEphemeral();
+        }
+    } catch (e) { alert('Erreur : ' + e.message); }
+}
+
+async function ephemAddToFlow(idx) {
+    const sorted = currentFilteredEphemeral();
+    const it = sorted[idx];
+    if (!it) return;
+    try {
+        const body = new URLSearchParams({
+            action: 'add', url: it.url || '', title: it.title || '',
+            channel: it.artist || '', type: 'audio', format: 'mp3'
+        });
+        const resp = await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(data.duplicate ? 'Deja dans Mon Flow' : 'Ajoute a Mon Flow');
+            loadEphemeral();
+        }
+    } catch (e) { alert('Erreur : ' + e.message); }
+}
+
+async function ephemDownload(idx) {
+    const sorted = currentFilteredEphemeral();
+    const it = sorted[idx];
+    if (!it || !it.url) return;
+    if (typeof handleSubmit === 'function') {
+        const urlInput = document.getElementById('urlInput');
+        if (urlInput) {
+            urlInput.value = it.url;
+            switchTab('download');
+            showToast('URL pre-remplie dans Telecharger');
+            return;
+        }
+    }
+    showToast('Va dans Telecharger et colle l\'URL');
+}
+
+function currentFilteredEphemeral() {
+    const q = (document.getElementById('ephemSearch').value || '').toLowerCase().trim();
+    const sortBy = document.getElementById('ephemSort').value;
+    let items = ephemeralCache.slice();
+    if (q) items = items.filter(it => (it.title || '').toLowerCase().includes(q) || (it.artist || '').toLowerCase().includes(q));
+    if (sortBy === 'recent') items.sort((a, b) => String(b.lastTs).localeCompare(String(a.lastTs)));
+    else if (sortBy === 'oldest') items.sort((a, b) => String(a.lastTs).localeCompare(String(b.lastTs)));
+    else if (sortBy === 'most') items.sort((a, b) => b.count - a.count);
+    else if (sortBy === 'title') items.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    return items;
+}
+
+// ===== COMPARATIF DES STRATEGIES =====
+const CMP_SCORES = {
+    monthly: { read_day: 0.95, read_month: 0.90, read_year: 0.70, read_global: 0.60, write: 0.85, disk: 0.85, robust: 0.95, scaling: 0.95 },
+    yearly:  { read_day: 0.65, read_month: 0.70, read_year: 0.95, read_global: 0.75, write: 0.50, disk: 0.95, robust: 0.55, scaling: 0.70 },
+    single:  { read_day: 0.40, read_month: 0.40, read_year: 0.45, read_global: 0.55, write: 0.20, disk: 1.00, robust: 0.10, scaling: 0.20 }
+};
+
+const CMP_CRIT_LABELS = {
+    read_day: 'Vitesse vue Jour',
+    read_month: 'Vitesse vue Mois',
+    read_year: 'Vitesse vue Annee',
+    read_global: 'Vitesse vue Global',
+    write: 'Vitesse d\'ecriture',
+    disk: 'Espace disque',
+    robust: 'Robustesse',
+    scaling: 'Scalabilite long terme'
+};
+
+const CMP_STRAT_META = {
+    monthly: { name: 'Mensuel', icon: '&#128197;', cls: 'monthly', color: '#2196F3',
+        pros: ['<span>Jour/Mois ultra-rapides</span> (1 fichier)', '<span>Robuste</span> : perte limitee a 1 mois', 'Taille bornee par fichier'],
+        cons: ['Beaucoup de fichiers a long terme', 'Vue Global lit tous les fichiers'] },
+    yearly: { name: 'Annuel', icon: '&#128198;', cls: 'yearly', color: '#4CAF50',
+        pros: ['<span>Vue Annee instantanee</span>', 'Peu de fichiers a gerer', 'Facile a sauvegarder'],
+        cons: ['Vue Jour scanne toute l\'annee', 'Fichiers grossissent avec le temps', 'Perte = 1 annee'] },
+    single: { name: 'Fichier unique', icon: '&#128196;', cls: 'single', color: '#ff9800',
+        pros: ['<span>Le plus simple</span>', 'Pas de coordination multi-fichiers', 'Aucun overhead JSON par fichier'],
+        cons: ['<span>Ne scale pas</span>', 'Reecrit tout a chaque event', '<span>Perte = tout</span>'] }
+};
+
+function getSelectedCriteria() {
+    return Array.from(document.querySelectorAll('#cmpCriteria input[type=checkbox]'))
+        .filter(c => c.checked).map(c => c.dataset.crit);
+}
+
+function computeWinner(selected) {
+    if (!selected.length) return null;
+    const totals = {};
+    Object.keys(CMP_SCORES).forEach(s => {
+        totals[s] = selected.reduce((sum, c) => sum + (CMP_SCORES[s][c] || 0), 0) / selected.length;
+    });
+    const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    return { winner: sorted[0][0], scores: totals, ranking: sorted };
+}
+
+function renderComparison() {
+    const selected = getSelectedCriteria();
+    const result = computeWinner(selected);
+    const winnerEl = document.getElementById('cmpWinner');
+    const chartEl = document.getElementById('cmpChart');
+    const grid = document.getElementById('cmpProsCons');
+    const radial = document.getElementById('cmpRadial');
+    if (!winnerEl) return;
+
+    if (!result) {
+        winnerEl.className = 'cmp-winner empty';
+        winnerEl.innerHTML = '<div style="padding:10px;">Coche au moins un critere pour voir la recommandation.</div>';
+    } else {
+        const meta = CMP_STRAT_META[result.winner];
+        const score = (result.scores[result.winner] * 100).toFixed(0);
+        winnerEl.className = 'cmp-winner';
+        winnerEl.innerHTML = `
+            <div class="cmp-winner-head">
+                <div class="cmp-winner-trophy">&#127942;</div>
+                <div>
+                    <div><span class="cmp-winner-name">${meta.name}</span><span class="cmp-winner-tag">Recommande</span></div>
+                    <div class="cmp-winner-detail">Meilleur compromis sur les ${selected.length} critere${selected.length > 1 ? 's' : ''} selectionne${selected.length > 1 ? 's' : ''}.</div>
+                </div>
+            </div>
+            <div class="cmp-winner-scores">
+                ${result.ranking.map(([s, sc], i) => `
+                    <div>${i === 0 ? '&#129352;' : i === 1 ? '&#129353;' : '&#129354;'} ${CMP_STRAT_META[s].name} : <b>${(sc * 100).toFixed(0)}/100</b></div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    const allCriteria = Object.keys(CMP_CRIT_LABELS);
+    let chartHtml = `<div class="cmp-row head">
+        <div class="cmp-cell">Critere</div>
+        <div class="cmp-cell">Mensuel</div>
+        <div class="cmp-cell">Annuel</div>
+        <div class="cmp-cell">Fichier unique</div>
+    </div>`;
+    allCriteria.forEach(crit => {
+        const isSelected = selected.includes(crit);
+        const cellFor = (s) => {
+            const v = CMP_SCORES[s][crit];
+            const cls = v >= 0.75 ? 'fast' : v >= 0.5 ? 'med' : 'slow';
+            const dis = isSelected ? '' : ' disabled';
+            return `<div class="cmp-cell${dis}">
+                <div class="cmp-bar"><div class="cmp-fill ${cls}" style="width:${(v*100).toFixed(0)}%"></div></div>
+                <div class="cmp-val">${(v*100).toFixed(0)}</div>
+            </div>`;
+        };
+        chartHtml += `<div class="cmp-row">
+            <div class="cmp-cell label">${CMP_CRIT_LABELS[crit]}${isSelected ? '' : ' <span style="font-size:9px;color:var(--text-muted);">(non comptee)</span>'}</div>
+            ${cellFor('monthly')}
+            ${cellFor('yearly')}
+            ${cellFor('single')}
+        </div>`;
+    });
+    chartEl.innerHTML = chartHtml;
+
+    grid.innerHTML = ['monthly', 'yearly', 'single'].map(s => {
+        const m = CMP_STRAT_META[s];
+        const isWinner = result && result.winner === s;
+        return `<div class="cmp-strat ${isWinner ? 'winner' : ''}">
+            <div class="cmp-strat-head">
+                <div class="cmp-strat-icon" style="background:${m.color}22;color:${m.color}">${m.icon}</div>
+                <div class="cmp-strat-name">${m.name}${isWinner ? ' &#127942;' : ''}</div>
+            </div>
+            <div class="cmp-strat-section">
+                <h4>Avantages</h4>
+                <ul class="pros">${m.pros.map(p => '<li>' + p + '</li>').join('')}</ul>
+            </div>
+            <div class="cmp-strat-section">
+                <h4>Inconvenients</h4>
+                <ul class="cons">${m.cons.map(p => '<li>' + p + '</li>').join('')}</ul>
+            </div>
+        </div>`;
+    }).join('');
+
+    if (result) {
+        radial.innerHTML = result.ranking.map(([s, sc], i) => {
+            const m = CMP_STRAT_META[s];
+            const pct = sc * 100;
+            const cls = pct >= 75 ? 'fast' : pct >= 50 ? 'med' : 'slow';
+            return `<div class="cmp-radial-row">
+                <div class="cmp-radial-name">${i === 0 ? '&#127942;' : ''} ${m.name}</div>
+                <div class="cmp-radial-bar"><div class="cmp-radial-fill cmp-fill ${cls}" style="width:${pct}%"></div></div>
+                <div class="cmp-radial-score">${pct.toFixed(0)}</div>
+            </div>`;
+        }).join('');
+    } else {
+        radial.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">Selectionne des criteres pour calculer les scores.</div>';
+    }
+}
+
+function renderStrategyHelp(strategy) {
+    const s = STRATEGY_DETAILS[strategy] || STRATEGY_DETAILS.monthly;
+    const fileBoxes = s.files.map(f => `<div class="sh-file ${f === '...' ? 'dim' : ''}">${f === '...' ? '...' : 'data/stats/' + f}</div>`).join('');
+    const perfRow = (label, val, ideal) => {
+        const cls = val >= 0.85 ? 'fast' : val >= 0.6 ? 'med' : 'slow';
+        const txt = val >= 0.85 ? 'Rapide' : val >= 0.6 ? 'Moyen' : 'Lent';
+        return `<div class="sh-perf-row"><span class="sh-perf-label">${label}</span><div class="sh-perf-bar"><div class="sh-perf-fill ${cls}" style="width:${(val*100).toFixed(0)}%"></div></div><span class="sh-perf-val">${txt}</span></div>`;
+    };
+    return `
+        <div class="sh-head">
+            <div class="sh-icon ${strategy}">${s.icon}</div>
+            <div>
+                <div class="sh-name">${s.name}${s.recommended ? '<span class="sh-recommended">Recommande</span>' : ''}</div>
+                <div class="sh-desc" style="margin-top:2px;">${s.desc}</div>
+            </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Fichiers crees :</div>
+        <div class="sh-files">${fileBoxes}</div>
+        <div class="sh-grid">
+            <div class="sh-card">
+                <div class="sh-card-title">Avantages</div>
+                <ul class="sh-list pros">${s.pros.map(p => '<li>' + p + '</li>').join('')}</ul>
+            </div>
+            <div class="sh-card">
+                <div class="sh-card-title">Inconvenients</div>
+                <ul class="sh-list cons">${s.cons.map(p => '<li>' + p + '</li>').join('')}</ul>
+            </div>
+        </div>
+        <div class="sh-perf">
+            <div class="sh-card-title" style="margin-bottom:8px;font-weight:600;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Performance</div>
+            ${perfRow('Vue Jour', s.perf.read_day)}
+            ${perfRow('Vue Mois', s.perf.read_month)}
+            ${perfRow('Vue Annee', s.perf.read_year)}
+            ${perfRow('Vue Global', s.perf.read_global)}
+            ${perfRow('Sur 5 ans+', s.perf.scaling)}
+        </div>
+    `;
+}
+
+async function statsApiCall(url) {
+    const resp = await fetch(url);
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+        throw new Error('Le serveur n\'expose pas /api/stats. Redemarre le serveur Node (Ctrl+C dans le terminal puis relance start.bat) pour charger la nouvelle route.');
+    }
+    return resp.json();
+}
+
+function previewStrategy(strategy) {
+    const help = document.getElementById('strategyHelp');
+    const applied = help && help.dataset.applied;
+    document.querySelectorAll('#strategySeg .seg-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.strategy === strategy);
+    });
+    if (!help) return;
+    help.innerHTML = renderStrategyHelp(strategy);
+    if (strategy !== applied) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-apply-strategy';
+        btn.style.cssText = 'margin-top:12px;background:var(--primary);color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;width:100%;font-weight:600;';
+        btn.textContent = `Appliquer la strategie "${STRATEGY_DETAILS[strategy].name}" (reecriture des fichiers)`;
+        btn.onclick = () => applyStorageStrategy(strategy);
+        help.appendChild(btn);
+    }
+}
+
+function applyStorageStrategy(strategy) {
+    if (!confirm(`Changer pour "${STRATEGY_DETAILS[strategy].name}" va reecrire tous les fichiers de stockage. Continuer ?`)) return;
+    statsApiCall('api/stats?action=set_strategy&strategy=' + encodeURIComponent(strategy))
+        .then(data => {
+            if (!data.success) { alert('Erreur : ' + (data.error || 'inconnue')); return; }
+            showToast(`Strategie "${strategy}" appliquee (${data.count || 0} evenements reecrits)`);
+            loadStorageInfo();
+            loadProfileStats();
+        })
+        .catch(e => alert(e.message));
+}
+
+function reimportStats() {
+    if (!confirm('Cela va effacer le stockage actuel et reimporter depuis history.json + flow.json. Continuer ?')) return;
+    statsApiCall('api/stats?action=reimport')
+        .then(data => {
+            if (!data.success) { alert('Erreur : ' + (data.error || 'inconnue')); return; }
+            showToast(`Import termine : ${data.count || 0} evenements`);
+            loadStorageInfo();
+            loadProfileStats();
+        })
+        .catch(e => alert(e.message));
+}
+
+function fmtBytes(n) {
+    if (n < 1024) return n + ' o';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' Ko';
+    return (n / 1024 / 1024).toFixed(2) + ' Mo';
+}
+
+async function loadStorageInfo() {
+    try {
+        const data = await statsApiCall('api/stats?action=info');
+        if (!data.success) return;
+
+        document.querySelectorAll('#strategySeg .seg-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.strategy === data.strategy);
+        });
+        const help = document.getElementById('strategyHelp');
+        help.dataset.applied = data.strategy;
+        help.innerHTML = renderStrategyHelp(data.strategy);
+
+        const info = document.getElementById('storageInfo');
+        const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        let html = `<div style="margin-bottom:8px;">
+            <strong>${data.fileCount}</strong> fichier${data.fileCount > 1 ? 's' : ''}
+            &middot; <strong>${data.totalEvents}</strong> evenement${data.totalEvents > 1 ? 's' : ''}
+            &middot; <strong>${fmtBytes(data.totalSize)}</strong> au total
+            ${data.migrated ? '' : '<span style="color:var(--error);"> (jamais importe)</span>'}
+        </div>`;
+        if (data.files.length) {
+            html += '<details style="font-size:11px;color:var(--text-muted);"><summary style="cursor:pointer;">Voir les fichiers</summary><div style="margin-top:6px;display:grid;grid-template-columns:auto 1fr 1fr;gap:4px 12px;">';
+            html += '<span style="font-weight:600;">Fichier</span><span style="font-weight:600;">Taille</span><span style="font-weight:600;">Events</span>';
+            data.files.forEach(f => {
+                html += `<span>${esc(f.name)}</span><span>${fmtBytes(f.size)}</span><span>${f.events}</span>`;
+            });
+            html += '</div></details>';
+        } else {
+            html += '<div style="color:var(--text-muted);font-size:11px;">Aucun fichier - clique sur "Re-importer" pour creer le stockage initial.</div>';
+        }
+        info.innerHTML = html;
+    } catch (e) {
+        const info = document.getElementById('storageInfo');
+        if (info) info.innerHTML = `<div style="color:var(--error);font-size:12px;padding:10px;background:var(--bg-hover);border-radius:8px;border:1px solid var(--error);">${e.message}</div>`;
+        console.error('loadStorageInfo error', e);
+    }
+}
+
+function setStatsDesign(d) {
+    statsState.design = d;
+    localStorage.setItem('yt_stats_design', d);
+    document.querySelectorAll('#statsDesignSeg .seg-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.design === d);
+    });
+    const cont = document.getElementById('statsContainer');
+    if (cont) cont.className = 'profile-container stats-design-' + d;
+    if (statsState.cache) renderStatsFromCache();
+}
+
+async function loadProfileStats() {
+    try {
+        if (statsState.year == null) {
+            const now = new Date();
+            statsState.year = now.getFullYear();
+            statsState.month = now.getMonth() + 1;
+        }
+        const params = new URLSearchParams({ action: 'get', view: statsState.view });
+        if (statsState.view === 'month' || statsState.view === 'day') params.set('year', statsState.year);
+        if (statsState.view === 'day') params.set('month', statsState.month);
+
+        const [statsResp, topResp] = await Promise.all([
+            fetch('api/stats?' + params.toString()),
+            fetch('api/stats?' + new URLSearchParams({ action: 'top_artists', view: statsState.view, year: statsState.year || 0, month: statsState.month || 0 }).toString())
+        ]);
+        const data = await statsResp.json();
+        const topData = await topResp.json();
+        if (!data.success) return;
+
+        statsState.availableMonths = data.availableMonths || [];
+        statsState.cache = { data, top: (topData.success ? topData.top : []) };
+
+        setStatsDesign(statsState.design);
+        renderStatsFromCache();
+    } catch (e) {
+        console.error('loadProfileStats error', e);
+    }
+}
+
+function renderStatsFromCache() {
+    if (!statsState.cache) return;
+    renderStats(statsState.cache.data, statsState.cache.top);
+}
+
+function setStatsView(view) {
+    statsState.view = view;
+    statsState.currentBucket = null;
+    document.querySelectorAll('#statsViewSeg .seg-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.view === view);
+    });
+    closeHourDetails();
+    loadProfileStats();
+}
+
+function navStatsPeriod(delta) {
+    const v = statsState.view;
+    if (v === 'month') {
+        statsState.year += delta;
+    } else if (v === 'day') {
+        let m = statsState.month + delta;
+        let y = statsState.year;
+        if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
+        statsState.year = y; statsState.month = m;
+    } else { return; }
+    closeHourDetails();
+    loadProfileStats();
+}
+
+function navStatsToday() {
+    const now = new Date();
+    statsState.year = now.getFullYear();
+    statsState.month = now.getMonth() + 1;
+    closeHourDetails();
+    loadProfileStats();
+}
+
+function renderStats(data, topArtists) {
+    const buckets = data.buckets || [];
+    const v = statsState.view;
+    const monthDays = (statsState.view === 'day' && statsState.year && statsState.month)
+        ? new Date(statsState.year, statsState.month, 0).getDate() : 0;
+
+    const periodNav = document.getElementById('periodNav');
+    const periodLabel = document.getElementById('periodLabel');
+    const periodPrev = document.getElementById('periodPrev');
+    const periodNext = document.getElementById('periodNext');
+    const periodToday = document.getElementById('periodToday');
+    if (v === 'global' || v === 'year') {
+        periodNav.classList.add('hidden');
+    } else {
+        periodNav.classList.remove('hidden');
+        if (v === 'month') periodLabel.textContent = 'Annee ' + statsState.year;
+        else periodLabel.textContent = STATS_MONTH_NAMES[statsState.month - 1] + ' ' + statsState.year;
+        periodPrev.disabled = false; periodNext.disabled = false; periodToday.style.display = '';
+    }
+
+    const total = data.total || 0;
+    document.getElementById('statTotal').textContent = total;
+    const scopeText = (v === 'global') ? 'depuis le debut'
+        : (v === 'year') ? 'toutes annees'
+        : (v === 'month') ? 'en ' + statsState.year
+        : 'en ' + STATS_MONTH_NAMES[statsState.month - 1] + ' ' + statsState.year;
+    document.getElementById('statTotalSub').textContent = scopeText;
+
+    let peakIdx = -1, peakVal = 0;
+    buckets.forEach((b, i) => { if (b.count > peakVal) { peakVal = b.count; peakIdx = i; } });
+    const elTop = document.getElementById('statTopHour');
+    const elTopLabel = document.getElementById('statTopLabel');
+    const elTopSub = document.getElementById('statTopHourSub');
+    const labels = { global: 'Heure la plus active', year: 'Annee la plus active', month: 'Mois le plus actif', day: 'Jour le plus actif' };
+    elTopLabel.textContent = labels[v];
+    if (peakIdx >= 0 && peakVal > 0) {
+        const b = buckets[peakIdx];
+        elTop.textContent = (v === 'month') ? STATS_MONTH_NAMES[b.key - 1] : (v === 'day') ? (String(b.key).padStart(2,'0') + '/' + String(statsState.month).padStart(2,'0')) : b.label;
+        elTopSub.textContent = peakVal + ' evenement' + (peakVal > 1 ? 's' : '');
+    } else {
+        elTop.textContent = '-'; elTopSub.textContent = 'Aucune donnee';
+    }
+
+    const elArt = document.getElementById('statTopArtist');
+    const elArtSub = document.getElementById('statTopArtistSub');
+    if (topArtists && topArtists.length) {
+        const [name, c] = topArtists[0];
+        elArt.textContent = name.length > 22 ? name.substring(0, 20) + '...' : name;
+        elArt.title = name;
+        elArtSub.textContent = c + ' evenement' + (c > 1 ? 's' : '');
+    } else {
+        elArt.textContent = '-'; elArtSub.textContent = 'Aucune donnee';
+    }
+    document.getElementById('topArtistScope').textContent = '(' + scopeText + ')';
+
+    const elRange = document.getElementById('statHourRange');
+    const elRangeLabel = document.getElementById('statRangeLabel');
+    const elRangeSub = document.getElementById('statHourRangeSub');
+    const rLabels = { global: 'Plage horaire (80%)', year: 'Periode active', month: 'Mois actifs', day: 'Jours actifs' };
+    elRangeLabel.textContent = rLabels[v];
+    if (total > 0 && buckets.length) {
+        if (v === 'global') {
+            const hSorted = buckets.map((b, i) => ({ v: b.count, i })).sort((a,b) => b.v - a.v);
+            let acc = 0, kept = [];
+            for (const x of hSorted) { if (!x.v) break; acc += x.v; kept.push(x.i); if (acc/total >= 0.8) break; }
+            kept.sort((a,b)=>a-b);
+            elRange.textContent = String(kept[0]).padStart(2,'0') + 'h - ' + String(kept[kept.length-1]).padStart(2,'0') + 'h';
+            const minH = kept[0], maxH = kept[kept.length-1];
+            const period = maxH < 12 ? 'matinee' : (minH >= 18 ? 'soiree' : (minH >= 12 ? 'apres-midi' : 'journee'));
+            elRangeSub.textContent = 'Surtout en ' + period;
+        } else {
+            const active = buckets.filter(b => b.count > 0);
+            if (!active.length) { elRange.textContent = '-'; elRangeSub.textContent = 'Aucune donnee'; }
+            else {
+                const fmt = (b) => v === 'month' ? STATS_MONTH_SHORT[b.key - 1] : v === 'year' ? String(b.key) : String(b.key).padStart(2,'0');
+                elRange.textContent = fmt(active[0]) + ' - ' + fmt(active[active.length - 1]);
+                elRangeSub.textContent = active.length + ' periode' + (active.length > 1 ? 's' : '') + ' avec activite';
+            }
+        }
+    } else {
+        elRange.textContent = '-'; elRangeSub.textContent = 'Aucune donnee';
+    }
+
+    const titleEl = document.getElementById('chartMainTitle');
+    const titles = {
+        global: 'Activite par heure (toutes periodes)',
+        year: 'Activite par annee',
+        month: 'Activite par mois en ' + statsState.year,
+        day: 'Activite par jour en ' + STATS_MONTH_NAMES[statsState.month - 1] + ' ' + statsState.year
+    };
+    titleEl.innerHTML = titles[v] + ' <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(clique sur une barre pour ' + (v === 'day' ? 'voir le detail' : 'zoomer / voir le detail') + ')</span>';
+
+    renderBucketChart(buckets, peakIdx);
+
+    const xAxis = document.getElementById('chartXAxis');
+    if (!buckets.length) { xAxis.innerHTML = ''; }
+    else if (v === 'global') xAxis.innerHTML = ['00h','06h','12h','18h','23h'].map(s=>`<span>${s}</span>`).join('');
+    else if (v === 'year') xAxis.innerHTML = `<span>${buckets[0].label}</span><span>${buckets[buckets.length-1].label}</span>`;
+    else if (v === 'month') xAxis.innerHTML = ['Jan','Avr','Juil','Oct','Dec'].map(s=>`<span>${s}</span>`).join('');
+    else if (v === 'day') {
+        const last = buckets.length;
+        xAxis.innerHTML = ['1', String(Math.ceil(last/2)), String(last)].map(s=>`<span>${s}</span>`).join('');
+    }
+
+    renderArtistChart((topArtists || []).slice(0, 5));
+}
+
+function renderBucketChart(buckets, peakIdx) {
+    const d = statsState.design;
+    if (d === 'line') return renderChartLine(buckets, peakIdx);
+    if (d === 'heatmap') return renderChartHeatmap(buckets, peakIdx);
+    if (d === 'minimal') return renderChartMinimal(buckets, peakIdx);
+    return renderChartBars(buckets, peakIdx, d);
+}
+
+function chartEmptyMsg(svg, W, H) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#888" font-size="13">Aucune donnee</text>`;
+}
+
+function renderChartBars(buckets, peakIdx, design) {
+    const svg = document.getElementById('chartHours');
+    if (!svg) return;
+    const W = 480, H = 200, pad = 22, n = Math.max(1, buckets.length);
+    const innerW = W - pad * 2, innerH = H - pad * 2;
+    const max = Math.max(1, ...buckets.map(b => b.count));
+    const barW = innerW / n;
+    const gap = Math.min(barW * 0.2, 6);
+
+    let svgHtml = '';
+    if (design === 'vibrant') {
+        svgHtml += `<defs>
+            <linearGradient id="barGradV" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stop-color="#9c27b0"/>
+                <stop offset="50%" stop-color="#e91e63"/>
+                <stop offset="100%" stop-color="#ff9800"/>
+            </linearGradient>
+            <linearGradient id="barGradPeak" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stop-color="#ff5722"/>
+                <stop offset="100%" stop-color="#ffeb3b"/>
+            </linearGradient>
+        </defs>`;
+    }
+    for (let i = 1; i < 4; i++) {
+        const y = pad + (innerH * i / 4);
+        svgHtml += `<line class="grid-line" x1="${pad}" y1="${y}" x2="${W - pad}" y2="${y}"/>`;
+    }
+    if (!buckets.length) { chartEmptyMsg(svg, W, H); return; }
+    buckets.forEach((b, i) => {
+        const h = (b.count / max) * innerH;
+        const x = pad + i * barW + gap / 2;
+        const y = H - pad - h;
+        const cls = (i === peakIdx && b.count > 0) ? 'bar peak' : 'bar';
+        const w = (barW - gap).toFixed(2);
+        const hitX = (pad + i * barW).toFixed(2);
+        const tip = `${b.label} : ${b.count} evenement${b.count > 1 ? 's' : ''}`;
+        const fill = design === 'vibrant'
+            ? ((i === peakIdx && b.count > 0) ? 'url(#barGradPeak)' : 'url(#barGradV)')
+            : '';
+        const fillAttr = fill ? ` fill="${fill}"` : '';
+        svgHtml += `<rect class="${cls}" data-idx="${i}"${fillAttr} x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w}" height="${h.toFixed(2)}" rx="2" onclick="onBucketClick(${i})"><title>${tip}</title></rect>`;
+        svgHtml += `<rect class="bar-hit" data-idx="${i}" x="${hitX}" y="${pad}" width="${barW.toFixed(2)}" height="${innerH}" onclick="onBucketClick(${i})"><title>${tip}</title></rect>`;
+    });
+    svg.innerHTML = svgHtml;
+}
+
+function renderChartLine(buckets, peakIdx) {
+    const svg = document.getElementById('chartHours');
+    if (!svg) return;
+    const W = 480, H = 200, pad = 22, n = Math.max(1, buckets.length);
+    const innerW = W - pad * 2, innerH = H - pad * 2;
+    const max = Math.max(1, ...buckets.map(b => b.count));
+    const stepX = n > 1 ? innerW / (n - 1) : 0;
+    const pts = buckets.map((b, i) => {
+        const x = pad + i * stepX;
+        const y = H - pad - (b.count / max) * innerH;
+        return [x, y];
+    });
+    let svgHtml = '<defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--primary)" stop-opacity="0.45"/><stop offset="100%" stop-color="var(--primary)" stop-opacity="0"/></linearGradient></defs>';
+    for (let i = 1; i < 4; i++) {
+        const y = pad + (innerH * i / 4);
+        svgHtml += `<line class="grid-line" x1="${pad}" y1="${y}" x2="${W - pad}" y2="${y}"/>`;
+    }
+    if (!buckets.length) { chartEmptyMsg(svg, W, H); return; }
+    if (pts.length > 1) {
+        const area = `M ${pts[0][0]} ${H - pad} ` + pts.map(p => `L ${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(' ') + ` L ${pts[pts.length-1][0]} ${H - pad} Z`;
+        const line = 'M ' + pts.map(p => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(' L ');
+        svgHtml += `<path d="${area}" fill="url(#areaGrad)"/>`;
+        svgHtml += `<path d="${line}" fill="none" stroke="var(--primary)" stroke-width="2.2"/>`;
+    }
+    pts.forEach((p, i) => {
+        const r = (i === peakIdx && buckets[i].count > 0) ? 5 : 3;
+        const fill = (i === peakIdx && buckets[i].count > 0) ? '#ff5722' : 'var(--primary)';
+        const tip = `${buckets[i].label} : ${buckets[i].count} evenement${buckets[i].count > 1 ? 's' : ''}`;
+        svgHtml += `<circle class="bar" data-idx="${i}" cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r="${r}" fill="${fill}" stroke="var(--bg-card)" stroke-width="1.5" onclick="onBucketClick(${i})"><title>${tip}</title></circle>`;
+        const hitX = pad + (i - 0.5) * stepX;
+        svgHtml += `<rect class="bar-hit" data-idx="${i}" x="${hitX.toFixed(2)}" y="${pad}" width="${stepX.toFixed(2)}" height="${innerH}" onclick="onBucketClick(${i})"><title>${tip}</title></rect>`;
+    });
+    svg.innerHTML = svgHtml;
+}
+
+function renderChartHeatmap(buckets, peakIdx) {
+    const svg = document.getElementById('chartHours');
+    if (!svg) return;
+    const W = 480, H = 200, pad = 14, n = Math.max(1, buckets.length);
+    const innerW = W - pad * 2, innerH = H - pad * 2;
+    const max = Math.max(1, ...buckets.map(b => b.count));
+    let cols, rows;
+    if (n <= 12) { cols = n; rows = 1; }
+    else if (n === 24) { cols = 12; rows = 2; }
+    else if (n <= 31) { cols = 7; rows = Math.ceil(n / 7); }
+    else { cols = Math.ceil(Math.sqrt(n)); rows = Math.ceil(n / cols); }
+    const cellW = innerW / cols, cellH = innerH / rows;
+    let svgHtml = '';
+    if (!buckets.length) { chartEmptyMsg(svg, W, H); return; }
+    buckets.forEach((b, i) => {
+        const r = Math.floor(i / cols), c = i % cols;
+        const x = pad + c * cellW, y = pad + r * cellH;
+        const intensity = b.count / max;
+        let color;
+        if (b.count === 0) color = 'rgba(255,255,255,0.05)';
+        else {
+            const hue = 220 - intensity * 220;
+            color = `hsl(${hue.toFixed(0)}, 80%, ${(35 + intensity * 30).toFixed(0)}%)`;
+        }
+        const tip = `${b.label} : ${b.count} evenement${b.count > 1 ? 's' : ''}`;
+        const stroke = (i === peakIdx && b.count > 0) ? ' stroke="#fff" stroke-width="2"' : '';
+        svgHtml += `<rect class="bar" data-idx="${i}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(cellW - 3).toFixed(2)}" height="${(cellH - 3).toFixed(2)}" rx="4" fill="${color}"${stroke} onclick="onBucketClick(${i})"><title>${tip}</title></rect>`;
+        if (cellW > 30) {
+            svgHtml += `<text x="${(x + cellW/2 - 1.5).toFixed(2)}" y="${(y + cellH/2 + 3).toFixed(2)}" text-anchor="middle" fill="#fff" font-size="10" pointer-events="none" opacity="${b.count > 0 ? 0.95 : 0.3}">${b.label}</text>`;
+        }
+    });
+    svg.innerHTML = svgHtml;
+}
+
+function renderChartMinimal(buckets, peakIdx) {
+    const svg = document.getElementById('chartHours');
+    if (!svg) return;
+    const W = 480, H = 200, pad = 16, n = Math.max(1, buckets.length);
+    const innerW = W - pad * 2, innerH = H - pad * 2;
+    const max = Math.max(1, ...buckets.map(b => b.count));
+    const barW = innerW / n;
+    let svgHtml = '';
+    if (!buckets.length) { chartEmptyMsg(svg, W, H); return; }
+    buckets.forEach((b, i) => {
+        const h = (b.count / max) * innerH;
+        const x = pad + i * barW + 1;
+        const y = H - pad - h;
+        const w = Math.max(2, barW - 2);
+        const fill = (i === peakIdx && b.count > 0) ? 'var(--text)' : 'var(--text-muted)';
+        const tip = `${b.label} : ${b.count} evenement${b.count > 1 ? 's' : ''}`;
+        svgHtml += `<rect class="bar" data-idx="${i}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="${fill}" onclick="onBucketClick(${i})"><title>${tip}</title></rect>`;
+        const hitX = (pad + i * barW).toFixed(2);
+        svgHtml += `<rect class="bar-hit" data-idx="${i}" x="${hitX}" y="${pad}" width="${barW.toFixed(2)}" height="${innerH}" onclick="onBucketClick(${i})"><title>${tip}</title></rect>`;
+    });
+    svgHtml += `<line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="var(--border)" stroke-width="1"/>`;
+    svg.innerHTML = svgHtml;
+}
+
+async function onBucketClick(idx) {
+    if (!statsState.cache) return;
+    const buckets = statsState.cache.data.buckets || [];
+    if (!buckets[idx]) return;
+    const b = buckets[idx];
+    const v = statsState.view;
+    statsState.currentBucket = { view: v, key: b.key, label: b.label };
+
+    document.querySelectorAll('#chartHours .bar').forEach(el => {
+        el.classList.toggle('selected', parseInt(el.dataset.idx, 10) === idx);
+    });
+
+    let title;
+    if (v === 'global') title = `Detail pour ${b.label} - ${b.label}59`;
+    else if (v === 'year') title = `Detail pour l'annee ${b.key}`;
+    else if (v === 'month') title = `Detail pour ${STATS_MONTH_NAMES[b.key-1]} ${statsState.year}`;
+    else title = `Detail pour le ${String(b.key).padStart(2,'0')}/${String(statsState.month).padStart(2,'0')}/${statsState.year}`;
+
+    const drillBtn = document.getElementById('hourDrillDown');
+    if (v === 'year' || v === 'month') {
+        drillBtn.style.display = '';
+        drillBtn.textContent = (v === 'year') ? 'Voir les mois' : 'Voir les jours';
+    } else {
+        drillBtn.style.display = 'none';
+    }
+
+    const listEl = document.getElementById('hourDetailsList');
+    document.getElementById('hourDetailsTitle').textContent = title + '  (chargement...)';
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Chargement...</div>';
+    document.getElementById('hourDetailsPanel').style.display = 'block';
+    document.getElementById('hourDetailsPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    try {
+        const params = new URLSearchParams({ action: 'details', view: v, key: b.key });
+        if (statsState.year) params.set('year', statsState.year);
+        if (statsState.month) params.set('month', statsState.month);
+        const resp = await fetch('api/stats?' + params.toString());
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'erreur');
+        showBucketDetailsPanel(title + `  (${data.total} evenement${data.total > 1 ? 's' : ''})`, data.items, data.total);
+    } catch (e) {
+        listEl.innerHTML = `<div style="color:var(--error);font-size:12px;text-align:center;padding:20px;">Erreur : ${e.message}</div>`;
+    }
+}
+
+function drillDownFromBucket() {
+    const cb = statsState.currentBucket;
+    if (!cb) return;
+    if (cb.view === 'year') { statsState.year = cb.key; setStatsView('month'); }
+    else if (cb.view === 'month') { statsState.month = cb.key; setStatsView('day'); }
+}
+
+function showBucketDetailsPanel(title, items, totalCount) {
+    const panel = document.getElementById('hourDetailsPanel');
+    const titleEl = document.getElementById('hourDetailsTitle');
+    const listEl = document.getElementById('hourDetailsList');
+    if (!panel) return;
+    titleEl.textContent = title;
+
+    if (!items.length) {
+        listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Aucun evenement.</div>';
+    } else {
+        const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        const kindLabel = (k) => k === 'play' ? 'Lecture Mon Flow' : k === 'add' ? 'Ajout a Mon Flow' : 'Telechargement';
+        let html = items.map(it => {
+            const p = statsParseTs(it.ts);
+            const dateStr = p ? statsFmtDateEU(p) : '';
+            const timeStr = p ? statsFmtTime(p) : '';
+            const src = it.src || 'audio';
+            const icon = src === 'flow' ? '&#9836;' : (src === 'video' ? '&#9654;' : '&#127925;');
+            const meta = (it.format || '').toUpperCase() + (it.format ? ' &middot; ' : '') + kindLabel(it.kind) + (it.artist ? ' &middot; ' + esc(it.artist) : '');
+            const link = it.url ? `<a href="${esc(it.url)}" target="_blank" style="color:inherit;text-decoration:none;">${esc(it.title || '(sans titre)')}</a>` : esc(it.title || '(sans titre)');
+            return `<div class="hd-row">
+                <div class="hd-icon ${src}">${icon}</div>
+                <div class="hd-info">
+                    <div class="hd-title">${link}</div>
+                    <div class="hd-meta">${meta}</div>
+                </div>
+                <div class="hd-time">${dateStr}<br>${timeStr}</div>
+            </div>`;
+        }).join('');
+        if (totalCount && totalCount > items.length) {
+            const rest = totalCount - items.length;
+            html += `<div style="color:var(--text-muted);font-size:11px;text-align:center;padding:8px;">${rest} evenement${rest > 1 ? 's' : ''} de plus non affiche${rest > 1 ? 's' : ''}</div>`;
+        }
+        listEl.innerHTML = html;
+    }
+
+    panel.style.display = 'block';
+}
+
+function closeHourDetails() {
+    const panel = document.getElementById('hourDetailsPanel');
+    if (panel) panel.style.display = 'none';
+    document.querySelectorAll('#chartHours .bar.selected').forEach(b => b.classList.remove('selected'));
+    statsState.currentBucket = null;
+}
+
+function renderArtistChart(top) {
+    const el = document.getElementById('chartArtists');
+    if (!el) return;
+    if (!top.length) {
+        el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Aucune donnee pour cette periode</div>';
+        return;
+    }
+    const max = top[0][1];
+    el.innerHTML = top.map(([name, count]) => {
+        const pct = max ? (count / max * 100) : 0;
+        const safe = name.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        return `<div class="chart-bar-h">
+            <div class="bh-label" title="${safe}">${safe}</div>
+            <div class="bh-track"><div class="bh-fill" style="width:${pct.toFixed(1)}%"></div></div>
+            <div class="bh-val">${count}</div>
+        </div>`;
+    }).join('');
+}
+
 function applyPrefs() {
     if (!currentUser) return;
 
@@ -1445,9 +2567,16 @@ async function searchYouTube(loadMore) {
         var sqFmt = document.getElementById('sqFormat').value.toUpperCase();
         var badgeClass = sqType === 'audio' ? 'badge-audio' : 'badge-video';
         var bar = '<div class="search-results-bar">'
-            + '<span class="sr-count">' + data.results.length + ' resultat(s) pour "' + query.replace(/</g, '&lt;') + '"</span>'
+            + '<span class="sr-count" id="srCount">' + data.results.length + ' resultat(s) pour "' + query.replace(/</g, '&lt;') + '"</span>'
             + '<button class="sr-btn-all" onclick="sqAddAll()">&#11015; Tout telecharger (' + data.results.length + ')</button>'
             + '<button class="sr-btn-all" style="background:#9C27B0;" onclick="searchAddAllToFlow()">+ Tout dans Mon Flow</button>'
+            + '</div>'
+            + '<div class="search-filter-bar">'
+            + '<span class="sfb-label">Filtrer :</span>'
+            + '<button class="sfb-chip active" data-filter="all" onclick="filterSearchResults(\'all\')">Tous <span class="sfb-count" id="sfbCountAll">0</span></button>'
+            + '<button class="sfb-chip sfb-new" data-filter="new" onclick="filterSearchResults(\'new\')">&#10024; Nouveaux <span class="sfb-count" id="sfbCountNew">0</span></button>'
+            + '<button class="sfb-chip sfb-dl" data-filter="dl" onclick="filterSearchResults(\'dl\')">&#10003; Telecharges <span class="sfb-count" id="sfbCountDl">0</span></button>'
+            + '<button class="sfb-chip sfb-flow" data-filter="flow" onclick="filterSearchResults(\'flow\')">&#10003; Mon Flow <span class="sfb-count" id="sfbCountFlow">0</span></button>'
             + '</div>';
         container.innerHTML = bar + '<div class="items-grid" id="searchGrid">' + data.results.map((r, i) => {
             var videoId = r.url.match(/[?&]v=([\w-]+)/);
@@ -1467,6 +2596,7 @@ async function searchYouTube(loadMore) {
             + '<button class="item-dl" onclick="sqAdd(' + i + ', true)">DL</button>'
             + '<button class="item-move" onclick="sqAdd(' + i + ')">+ File</button>'
             + '<button class="item-move" style="background:#9C27B0;color:#fff;" onclick="searchAddToFlow(' + i + ', this)">+ Flow</button>'
+            + '<button class="item-move" style="background:#FF6D00;color:#fff;" onclick="searchPlayAudio(' + i + ')" title="Ecouter audio seul">&#127911; Ecouter</button>'
             + '<button class="item-move" style="background:#2196F3;color:#fff;" onclick="playYoutubeVideo(\'' + r.url.replace(/'/g, "\\'") + '\', \'' + safeTitle + '\')">&#9654; Video</button>'
             + '</div></div></div>';
         }).join('') + '</div>'
@@ -1493,6 +2623,7 @@ document.getElementById('searchInput').addEventListener('keydown', function(e) {
 let sqQueue = [];
 let sqRunning = false;
 let sqLog = [];
+let sqLogTab = 'unread';
 
 // --- Formats ---
 function sqUpdateFormats() {
@@ -1523,7 +2654,6 @@ async function sqCheckUrl(url, format) {
 async function sqMarkDownloaded() {
     if (!lastSearchResults.length) return;
 
-    // Charger la biblio et Mon Flow en parallele
     let libItems = [];
     let flowItems = [];
     try {
@@ -1546,20 +2676,148 @@ async function sqMarkDownloaded() {
         const card = document.querySelector('#searchGrid .item-card:nth-child(' + (i + 1) + ')');
         if (!card) continue;
 
-        if (vid && libVids.has(vid) && !card.classList.contains('sq-downloaded')) {
-            card.classList.add('sq-downloaded');
-            const badge = card.querySelector('.badge');
-            if (badge) { badge.className = 'badge badge-downloaded'; badge.textContent = '✓ DL'; }
+        const inLib = vid && libVids.has(vid);
+        const inFlow = vid && flowVids.has(vid);
+
+        const dlBtn = card.querySelector('.item-dl');
+        if (dlBtn) {
+            dlBtn.classList.toggle('owned', inLib);
+            dlBtn.innerHTML = inLib ? '&#10003; DL' : 'DL';
+            dlBtn.title = inLib ? 'Deja telecharge - clique pour re-telecharger' : 'Telecharger';
         }
-        if (vid && flowVids.has(vid)) {
-            card.classList.add('sq-in-flow');
-            const flowBtn = card.querySelector('[onclick*="searchAddToFlow"]');
-            if (flowBtn) { flowBtn.textContent = '✓ Flow'; flowBtn.style.background = '#666'; flowBtn.disabled = true; }
+        const flowBtn = card.querySelector('[onclick*="searchAddToFlow"]');
+        if (flowBtn) {
+            flowBtn.classList.toggle('owned', inFlow);
+            flowBtn.innerHTML = inFlow ? '&#10003; Flow' : '+ Flow';
+            flowBtn.style.background = '';
+            flowBtn.disabled = false;
+            flowBtn.title = inFlow ? 'Deja dans Mon Flow' : 'Ajouter a Mon Flow';
         }
+
+        card.classList.toggle('sq-downloaded', inLib);
+        card.classList.toggle('sq-in-flow', inFlow);
+        card.dataset.isNew = (!inLib && !inFlow) ? '1' : '0';
+
+        let chips = card.querySelector('.status-chips');
+        if (!chips) {
+            chips = document.createElement('div');
+            chips.className = 'status-chips';
+            const body = card.querySelector('.item-body');
+            if (body) body.insertBefore(chips, body.firstChild);
+        }
+        let html = '';
+        if (inLib) html += '<span class="sc-chip sc-dl" title="Deja dans ta bibliotheque">&#10003; Telecharge</span>';
+        if (inFlow) html += '<span class="sc-chip sc-flow" title="Deja dans Mon Flow">&#10003; Mon Flow</span>';
+        if (!inLib && !inFlow) html += '<span class="sc-chip sc-new" title="Nouveau pour toi">Nouveau</span>';
+        chips.innerHTML = html;
+    }
+    updateSearchFilterCounts();
+    const cur = (document.querySelector('.sfb-chip.active') || {}).dataset?.filter || 'all';
+    filterSearchResults(cur);
+}
+
+function updateSearchFilterCounts() {
+    const cards = document.querySelectorAll('#searchGrid .item-card');
+    let dl = 0, flow = 0, news = 0;
+    cards.forEach(c => {
+        if (c.classList.contains('sq-downloaded')) dl++;
+        if (c.classList.contains('sq-in-flow')) flow++;
+        if (c.dataset.isNew === '1') news++;
+    });
+    const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+    set('sfbCountAll', cards.length);
+    set('sfbCountNew', news);
+    set('sfbCountDl', dl);
+    set('sfbCountFlow', flow);
+}
+
+function filterSearchResults(filter) {
+    document.querySelectorAll('.sfb-chip').forEach(b => {
+        b.classList.toggle('active', b.dataset.filter === filter);
+    });
+    const cards = document.querySelectorAll('#searchGrid .item-card');
+    let visible = 0;
+    cards.forEach(c => {
+        let show = true;
+        if (filter === 'new') show = c.dataset.isNew === '1';
+        else if (filter === 'dl') show = c.classList.contains('sq-downloaded');
+        else if (filter === 'flow') show = c.classList.contains('sq-in-flow');
+        c.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    const countEl = document.getElementById('srCount');
+    if (countEl) {
+        const labels = { all: 'tous', new: 'nouveaux', dl: 'deja telecharges', flow: 'dans Mon Flow' };
+        const label = labels[filter] || filter;
+        countEl.textContent = (filter === 'all')
+            ? `${visible} resultat${visible > 1 ? 's' : ''}`
+            : `${visible} ${label} sur ${cards.length}`;
     }
 }
 
 // --- Ajouter un element ---
+let searchPlayIdx = -1;
+
+async function searchPlayAudio(index) {
+    const r = lastSearchResults && lastSearchResults[index];
+    if (!r || !r.url) return;
+
+    const bar = document.getElementById('playerBar');
+    const mainAudio = document.getElementById('audioEl');
+
+    mainAudio.pause();
+    mainAudio.src = '';
+
+    searchPlayIdx = index;
+    playbackContext = 'search';
+
+    bar.classList.add('active');
+    document.body.classList.add('player-open');
+    closeVideoPlayer();
+
+    let thumb = r.thumbnail || '';
+    if (!thumb) { const m = (r.url || '').match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+
+    document.getElementById('playerThumb').src = thumb;
+    document.getElementById('playerTitle').textContent = r.title || 'Chargement...';
+    document.getElementById('playerArtist').textContent = (r.channel || '') + ' · Chargement...';
+    document.getElementById('btnPlayPause').innerHTML = '&#9654;';
+    const nextEl = document.getElementById('playerNext');
+    if (nextEl) nextEl.style.display = 'none';
+
+    try {
+        const resp = await fetch('api/stream?url=' + encodeURIComponent(r.url) + '&type=audio');
+        const data = await resp.json();
+        if (!data.success) {
+            document.getElementById('playerArtist').textContent = 'Erreur : flux indisponible';
+            return;
+        }
+        mainAudio.src = data.streamUrl;
+        mainAudio.volume = document.getElementById('volumeSlider').value / 100;
+        mainAudio.play().catch(() => {});
+        document.getElementById('playerArtist').textContent = (r.channel || '') + ' · Streaming';
+        document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
+        mainAudio.onended = function() { searchPlayNext(); };
+        const card = document.querySelector('#searchGrid .item-card:nth-child(' + (index + 1) + ')');
+        const owned = card && (card.classList.contains('sq-downloaded') || card.classList.contains('sq-in-flow'));
+        if (!owned) recordEphemeralListen(r);
+    } catch (e) {
+        document.getElementById('playerArtist').textContent = 'Erreur de connexion';
+    }
+}
+
+function searchPlayNext() {
+    if (!lastSearchResults || lastSearchResults.length === 0) return;
+    const n = (searchPlayIdx + 1) % lastSearchResults.length;
+    searchPlayAudio(n);
+}
+
+function searchPlayPrev() {
+    if (!lastSearchResults || lastSearchResults.length === 0) return;
+    const n = (searchPlayIdx - 1 + lastSearchResults.length) % lastSearchResults.length;
+    searchPlayAudio(n);
+}
+
 async function searchAddToFlow(index, btn) {
     const r = lastSearchResults[index];
     if (!r) return;
@@ -1577,8 +2835,16 @@ async function searchAddToFlow(index, btn) {
         const data = await resp.json();
         btn.textContent = data.duplicate ? 'Deja' : 'OK!';
         btn.style.background = data.duplicate ? '#666' : '#4CAF50';
+        if (data.success) {
+            const card = btn.closest('.item-card');
+            if (card) {
+                card.classList.add('sq-in-flow');
+                card.dataset.isNew = '0';
+            }
+            setTimeout(() => sqMarkDownloaded(), 200);
+        }
     } catch (e) { btn.textContent = '!'; }
-    setTimeout(() => { btn.textContent = '+ Flow'; btn.style.background = '#9C27B0'; btn.disabled = false; }, 2500);
+    setTimeout(() => { btn.disabled = false; sqMarkDownloaded(); }, 2500);
 }
 
 async function searchAddAllToFlow() {
@@ -1587,14 +2853,174 @@ async function searchAddAllToFlow() {
         url: r.url, title: r.title || '', channel: r.channel || '',
         thumbnail: r.thumbnail || '', duration: r.duration || ''
     }));
+    const queryInput = document.getElementById('searchInput');
+    const defaultName = queryInput ? (queryInput.value || '').trim() : '';
+    openAddBulkToFlow(items, () => sqMarkDownloaded(), defaultName);
+}
+
+async function openAddBulkToFlow(items, onDone, defaultName) {
+    if (!items || !items.length) return;
+    let existing = [];
+    try {
+        const resp = await fetch('api/flow?action=list');
+        const data = await resp.json();
+        if (data.success) existing = (data.playlists || []).map(p => p.name).filter(Boolean);
+    } catch (e) {}
+    aafPendingItems = items;
+    aafOnDone = onDone || null;
+    showAddAllToFlowModal(existing, items.length, defaultName || '');
+}
+
+let aafPendingItems = [];
+let aafOnDone = null;
+
+function showAddAllToFlowModal(existingPlaylists, count, defaultName) {
+    let modal = document.getElementById('addAllFlowModal');
+    if (modal) modal.remove();
+
+    const existingOptions = existingPlaylists.length
+        ? existingPlaylists.map(n => `<option value="${n.replace(/"/g, '&quot;')}">${n.replace(/</g,'&lt;')}</option>`).join('')
+        : '<option disabled>(aucune playlist existante)</option>';
+
+    const safeDefault = (defaultName || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const proposedDefault = defaultName && existingPlaylists.some(n => n.toLowerCase() === defaultName.toLowerCase())
+        ? defaultName + ' (2)' : defaultName || '';
+    const safeProposed = proposedDefault.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const newDefaultChecked = defaultName ? 'checked' : '';
+    const noneChecked = defaultName ? '' : 'checked';
+
+    const html = `
+        <div class="modal-overlay active" id="addAllFlowModal">
+            <div class="modal" style="width:420px;">
+                <h3>Ajouter ${count} titre${count > 1 ? 's' : ''} a Mon Flow</h3>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;margin-top:-8px;">Choisis ou se rangent les nouveaux titres.</p>
+
+                <div style="margin-bottom:14px;">
+                    <label class="modal-radio"><input type="radio" name="aafDest" value="none" ${noneChecked} onchange="aafUpdateMode()"> <span>Aucune playlist (racine de Mon Flow)</span></label>
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label class="modal-radio"><input type="radio" name="aafDest" value="existing" onchange="aafUpdateMode()" ${existingPlaylists.length ? '' : 'disabled'}> <span>Playlist existante</span></label>
+                    <select id="aafExistingSelect" disabled style="margin-top:6px;">${existingOptions}</select>
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label class="modal-radio"><input type="radio" name="aafDest" value="new" ${newDefaultChecked} onchange="aafUpdateMode()"> <span>Nouvelle playlist${defaultName ? ' <span style="color:var(--text-muted);font-size:11px;">(pre-rempli avec ta recherche, modifiable)</span>' : ''}</span></label>
+                    <input type="text" id="aafNewName" placeholder="Nom de la nouvelle playlist..." value="${safeProposed}" maxlength="60" oninput="aafValidateNewName()" onkeydown="if(event.key==='Enter')aafSubmit()" style="margin-top:6px;">
+                    <div id="aafNameError" style="color:var(--error,#f44336);font-size:11px;margin-top:4px;display:none;"></div>
+                </div>
+
+                <div class="modal-btns">
+                    <button class="btn-cancel" onclick="aafClose()">Annuler</button>
+                    <button id="aafSubmitBtn" onclick="aafSubmit()" style="background:var(--primary);color:#fff;border:none;border-radius:20px;font-weight:600;">Ajouter</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+    aafExisting = existingPlaylists.slice();
+    setTimeout(() => {
+        aafUpdateMode();
+        if (defaultName) {
+            const inp = document.getElementById('aafNewName');
+            if (inp) { inp.focus(); inp.select(); }
+        }
+    }, 30);
+}
+
+let aafExisting = [];
+
+function aafUpdateMode() {
+    const mode = document.querySelector('input[name="aafDest"]:checked').value;
+    document.getElementById('aafExistingSelect').disabled = mode !== 'existing';
+    const newInput = document.getElementById('aafNewName');
+    newInput.disabled = mode !== 'new';
+    if (mode === 'new') newInput.focus();
+    aafValidateNewName();
+}
+
+function aafValidateNewName() {
+    const mode = document.querySelector('input[name="aafDest"]:checked').value;
+    const errEl = document.getElementById('aafNameError');
+    const submitBtn = document.getElementById('aafSubmitBtn');
+    submitBtn.disabled = false;
+    submitBtn.style.opacity = '1';
+    errEl.style.display = 'none';
+    errEl.style.color = '';
+    submitBtn.textContent = 'Ajouter';
+    if (mode !== 'new') return;
+    const name = (document.getElementById('aafNewName').value || '').trim();
+    if (!name) {
+        errEl.textContent = 'Donne un nom a ta playlist.';
+        errEl.style.color = 'var(--error,#f44336)';
+        errEl.style.display = 'block';
+        submitBtn.disabled = true; submitBtn.style.opacity = '0.5';
+        return;
+    }
+    if (name.length > 60) {
+        errEl.textContent = '60 caracteres maximum.';
+        errEl.style.color = 'var(--error,#f44336)';
+        errEl.style.display = 'block';
+        submitBtn.disabled = true; submitBtn.style.opacity = '0.5';
+        return;
+    }
+    const exists = aafExisting.some(n => n.toLowerCase() === name.toLowerCase());
+    if (exists) {
+        errEl.innerHTML = `&#9432; La playlist "<b>${name.replace(/</g,'&lt;')}</b>" existe deja - les titres y seront ajoutes.`;
+        errEl.style.color = 'var(--text-muted)';
+        errEl.style.display = 'block';
+        submitBtn.textContent = 'Ajouter dans la playlist existante';
+    }
+}
+
+function aafClose() {
+    const m = document.getElementById('addAllFlowModal');
+    if (m) m.remove();
+}
+
+async function aafSubmit() {
+    const mode = document.querySelector('input[name="aafDest"]:checked').value;
+    let playlist = '';
+
+    if (mode === 'existing') {
+        playlist = document.getElementById('aafExistingSelect').value || '';
+    } else if (mode === 'new') {
+        const name = (document.getElementById('aafNewName').value || '').trim();
+        if (!name) return;
+        const matched = aafExisting.find(n => n.toLowerCase() === name.toLowerCase());
+        if (matched) {
+            playlist = matched;
+        } else {
+            try {
+                const resp = await fetch('api/flow', {
+                    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'action=create_playlist&name=' + encodeURIComponent(name)
+                });
+                const data = await resp.json();
+                if (!data.success && !/existe/i.test(data.error || '')) {
+                    alert('Erreur creation playlist : ' + (data.error || 'inconnue')); return;
+                }
+                playlist = name;
+            } catch (e) { alert('Erreur creation playlist : ' + e.message); return; }
+        }
+    }
+
+    const items = aafPendingItems.map(r => ({ ...r, playlist }));
+
     try {
         const resp = await fetch('api/flow', {
             method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
         });
         const data = await resp.json();
-        alert(data.added + ' titre(s) ajoute(s) a Mon Flow');
-    } catch (e) { alert('Erreur'); }
+        aafClose();
+        const dest = playlist ? `playlist "${playlist}"` : 'racine de Mon Flow';
+        const parts = [];
+        if (data.added) parts.push(`${data.added} ajoute${data.added > 1 ? 's' : ''}`);
+        if (data.moved) parts.push(`${data.moved} deplace${data.moved > 1 ? 's' : ''}`);
+        if (data.alreadyThere) parts.push(`${data.alreadyThere} deja la`);
+        showToast(parts.length ? `${parts.join(' + ')} dans ${dest}` : `Aucun changement dans ${dest}`);
+        if (typeof aafOnDone === 'function') aafOnDone(data);
+        aafPendingItems = []; aafOnDone = null;
+    } catch (e) { alert('Erreur : ' + e.message); }
 }
 
 function sqAdd(index, startNow) {
@@ -2022,7 +3448,13 @@ function sqClearAll() {
 // --- Notifications (via serveur) ---
 function sqAddLog(type, title, detail) {
     // Ajouter localement pour affichage immediat
-    sqLog.unshift({ type, title, detail, time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) });
+    const ts = Date.now();
+    sqLog.unshift({
+        id: 'local_' + ts + '_' + Math.random().toString(36).slice(2, 8),
+        type, title, detail,
+        time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        read: false
+    });
     if (sqLog.length > 100) sqLog.pop();
     sqRenderLog();
     // Envoyer au serveur
@@ -2036,33 +3468,120 @@ function sqAddLog(type, title, detail) {
     }).catch(() => {});
 }
 
+function sqSetLogTab(tab) {
+    sqLogTab = tab === 'read' ? 'read' : 'unread';
+    document.querySelectorAll('.sq-log-tab').forEach(el => {
+        el.classList.toggle('active', el.dataset.tab === sqLogTab);
+    });
+    sqRenderLog();
+}
+
+function sqEscape(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+    ));
+}
+
 function sqRenderLog() {
     const body = document.getElementById('sqLogBody');
     const badge = document.getElementById('sqLogBadge');
     if (!body) return;
 
+    const unread = sqLog.filter(e => !e.read);
+    const read = sqLog.filter(e => e.read);
+
+    const cU = document.getElementById('sqLogCountUnread');
+    const cR = document.getElementById('sqLogCountRead');
+    if (cU) cU.textContent = unread.length;
+    if (cR) cR.textContent = read.length;
+
     if (badge) {
-        badge.textContent = sqLog.length > 0 ? sqLog.length : '';
-        badge.style.display = sqLog.length > 0 ? 'inline-flex' : 'none';
+        badge.textContent = unread.length > 0 ? unread.length : '';
+        badge.style.display = unread.length > 0 ? 'inline-flex' : 'none';
     }
 
-    if (sqLog.length === 0) {
-        body.innerHTML = '<div class="sq-empty">Aucune notification.</div>';
+    const list = sqLogTab === 'read' ? read : unread;
+    if (list.length === 0) {
+        body.innerHTML = '<div class="sq-empty">'
+            + (sqLogTab === 'read' ? 'Aucun message lu.' : 'Aucun message non lu.')
+            + '</div>';
         return;
     }
 
     const icons = { skip: '&#9197;', success: '&#10003;', error: '&#10007;' };
     const cls = { skip: 'skip', success: 'ok', error: 'err' };
-    body.innerHTML = sqLog.map(e =>
-        '<div class="sq-log-item sq-log-' + (cls[e.type] || 'skip') + '">'
-        + '<span class="sq-log-icon">' + (icons[e.type] || '&#8226;') + '</span>'
-        + '<div class="sq-log-content">'
-        + '<div class="sq-log-title">' + e.title + '</div>'
-        + '<div class="sq-log-detail">' + e.detail + (e.source === 'extension' ? ' (ext)' : '') + '</div>'
-        + '</div>'
-        + '<span class="sq-log-time">' + e.time + '</span>'
-        + '</div>'
-    ).join('');
+    body.innerHTML = list.map(e => {
+        const id = sqEscape(e.id || '');
+        const actionBtn = e.read
+            ? '<button class="sq-log-action" title="Marquer comme non lu" onclick="sqMarkUnread(\'' + id + '\')">&#8635;</button>'
+            : '<button class="sq-log-action" title="Marquer comme lu" onclick="sqMarkRead(\'' + id + '\')">&#10003;</button>';
+        const replyBtn = '<button class="sq-log-action sq-log-reply" title="Repondre a contact@bokonzi.com" onclick="sqReplyMail(\'' + id + '\')">&#9993; Repondre</button>';
+        return '<div class="sq-log-item sq-log-' + (cls[e.type] || 'skip') + (e.read ? ' sq-log-read' : '') + '">'
+            + '<span class="sq-log-icon">' + (icons[e.type] || '&#8226;') + '</span>'
+            + '<div class="sq-log-content">'
+            + '<div class="sq-log-title">' + sqEscape(e.title) + '</div>'
+            + '<div class="sq-log-detail">' + sqEscape(e.detail) + (e.source === 'extension' ? ' (ext)' : '') + '</div>'
+            + '</div>'
+            + '<span class="sq-log-time">' + sqEscape(e.time) + '</span>'
+            + '<div class="sq-log-actions">' + replyBtn + actionBtn + '</div>'
+            + '</div>';
+    }).join('');
+}
+
+const SQ_CONTACT_EMAIL = 'contact@bokonzi.com';
+
+function sqReplyMail(id) {
+    const item = sqLog.find(n => n.id === id);
+    if (!item) return;
+    const subject = 'Re: ' + (item.title || 'Notification');
+    const body = 'Bonjour,\n\n\n\n---\nNotification d\'origine :\n'
+        + 'Titre : ' + (item.title || '') + '\n'
+        + 'Detail : ' + (item.detail || '') + '\n'
+        + 'Heure : ' + (item.time || '') + '\n'
+        + 'Type : ' + (item.type || '') + '\n';
+    const href = 'mailto:' + SQ_CONTACT_EMAIL
+        + '?subject=' + encodeURIComponent(subject)
+        + '&body=' + encodeURIComponent(body);
+    window.location.href = href;
+}
+
+function sqContactMail() {
+    const href = 'mailto:' + SQ_CONTACT_EMAIL
+        + '?subject=' + encodeURIComponent('Contact - YouTube Downloader')
+        + '&body=' + encodeURIComponent('Bonjour,\n\n');
+    window.location.href = href;
+}
+
+function sqMarkRead(id) {
+    const item = sqLog.find(n => n.id === id);
+    if (item) item.read = true;
+    sqRenderLog();
+    fetch('api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=markRead&id=' + encodeURIComponent(id)
+    }).catch(() => {});
+}
+
+function sqMarkUnread(id) {
+    const item = sqLog.find(n => n.id === id);
+    if (item) item.read = false;
+    sqRenderLog();
+    fetch('api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=markUnread&id=' + encodeURIComponent(id)
+    }).catch(() => {});
+}
+
+function sqMarkAllRead() {
+    sqLog.forEach(n => { n.read = true; });
+    sqRenderLog();
+    fetch('api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=markAllRead'
+    }).catch(() => {});
 }
 
 function sqClearLog() {
@@ -2081,9 +3600,10 @@ async function sqPollNotifications() {
         const resp = await fetch('api/notifications?action=list');
         const data = await resp.json();
         if (!data.success || !data.notifications) return;
-        sqLog = data.notifications.map(n => ({
+        sqLog = data.notifications.map((n, i) => ({
+            id: n.id || ('legacy_' + (n.timestamp || i) + '_' + i),
             type: n.type, title: n.title, detail: n.detail,
-            time: n.time, source: n.source
+            time: n.time, source: n.source, read: !!n.read
         }));
         sqRenderLog();
     } catch (e) {}
@@ -3196,6 +4716,7 @@ async function streamFromHistory(idx, type) {
     playerDiv.style.display = 'block';
     titleEl.textContent = h.title || 'Chargement...';
     currentStreamIdx = idx;
+    playbackContext = 'history';
 
     // Thumbnail
     let thumb = h.thumbnail || '';
@@ -3308,6 +4829,17 @@ function getNextStreamIdx(currentIdx) {
     return -1;
 }
 
+function getPrevStreamIdx(currentIdx) {
+    const items = document.querySelectorAll('.history-item:not([style*="display: none"])');
+    let prevIdx = -1;
+    for (const item of items) {
+        const idx = parseInt(item.dataset.idx);
+        if (idx === currentIdx) return prevIdx;
+        if (historyCache[idx] && historyCache[idx].url) prevIdx = idx;
+    }
+    return -1;
+}
+
 function preloadNext(currentIdx, type) {
     const nextIdx = getNextStreamIdx(currentIdx);
     if (nextIdx === -1) { preloadedNext = null; return; }
@@ -3344,6 +4876,7 @@ function stopStream() {
     document.querySelectorAll('.history-item').forEach(el => el.classList.remove('hi-playing'));
     currentStreamIdx = -1;
     preloadedNext = null;
+    playbackContext = 'library';
 }
 
 async function addToFlowFromHistory(idx, btn) {
@@ -3381,6 +4914,7 @@ async function addToFlowFromHistory(idx, btn) {
 // ========== MON FLOW ==========
 let flowTracks = [];
 let flowPlaylists = [];
+let flowViewMode = ''; // '', 'top', 'recent', 'liked'
 let flowCurrentIdx = -1;
 let flowCurrentType = 'audio';
 let flowShuffle = false;
@@ -3408,6 +4942,34 @@ async function loadFlow() {
     } catch (e) {}
 }
 
+function flowParseDurationSec(s) {
+    if (!s) return 0;
+    const str = String(s).trim();
+    const m = str.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+    if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+    const sec = parseInt(str, 10);
+    return isNaN(sec) ? 0 : sec;
+}
+
+function flowFormatTotalDuration(tracks) {
+    let total = 0, known = 0;
+    tracks.forEach(t => {
+        const s = flowParseDurationSec(t.duration);
+        if (s > 0) { total += s; known++; }
+    });
+    if (!known) return '';
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    let txt = '';
+    if (h > 0) txt = `${h}h ${m.toString().padStart(2, '0')}min`;
+    else if (m > 0) txt = `${m}min ${s.toString().padStart(2, '0')}s`;
+    else txt = `${s}s`;
+    const missing = tracks.length - known;
+    const note = missing > 0 ? `<span class="ftc-missing">${missing} sans duree</span>` : '';
+    return `<span class="ftc-duration">&#9201; ~${txt}</span>${note}`;
+}
+
 function renderFlow() {
     const list = document.getElementById('flowList');
     const countEl = document.getElementById('flowTrackCount');
@@ -3416,7 +4978,13 @@ function renderFlow() {
     // Filtres playlists
     const plDiv = document.getElementById('flowPlaylists');
     const plNames = [...new Set(flowTracks.map(t => t.playlist).filter(Boolean))];
-    let plHtml = '<span class="flow-pl-chip' + (!flowCurrentPlaylist ? ' active' : '') + '" onclick="flowFilterPlaylist(\'\', this)" ondragover="event.preventDefault()" ondrop="flowDropOnPlaylist(event, \'\')">Tout (' + flowTracks.length + ')</span>';
+    const likedCountF = flowTracks.filter(t => t.liked).length;
+    const playedCountF = flowTracks.filter(t => (t.playCount || 0) > 0).length;
+    let plHtml = '<span class="flow-pl-chip' + (!flowCurrentPlaylist && !flowViewMode ? ' active' : '') + '" onclick="flowFilterPlaylist(\'\', this)" ondragover="event.preventDefault()" ondrop="flowDropOnPlaylist(event, \'\')">Tout (' + flowTracks.length + ')</span>';
+    // Vues rapides
+    if (playedCountF > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'top' ? ' active' : '') + '" onclick="flowSetViewMode(\'top\', this)" title="Top 20 les plus ecoutes">&#11088; Plus ecoutes</span>';
+    if (flowTracks.length > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'recent' ? ' active' : '') + '" onclick="flowSetViewMode(\'recent\', this)" title="20 derniers ajouts">&#128336; Recemment ajoutes</span>';
+    plHtml += '<span class="flow-pl-chip flow-pl-liked' + (flowViewMode === 'liked' ? ' active' : '') + '" onclick="flowSetViewMode(\'liked\', this)" title="Titres aim&eacute;s"><span class="chip-heart-big">&#10084;</span> Aim&eacute;s (' + likedCountF + ')</span>';
     const unassigned = flowTracks.filter(t => !t.playlist).length;
     if (plNames.length > 0 && unassigned > 0) {
         plHtml += '<span class="flow-pl-chip' + (flowCurrentPlaylist === '__none__' ? ' active' : '') + '" onclick="flowFilterPlaylist(\'__none__\', this)" ondragover="event.preventDefault(); this.classList.add(\'flow-pl-dragover\')" ondragleave="this.classList.remove(\'flow-pl-dragover\')" ondrop="this.classList.remove(\'flow-pl-dragover\'); flowDropOnPlaylist(event, \'\')">Sans playlist (' + unassigned + ')</span>';
@@ -3426,22 +4994,39 @@ function renderFlow() {
     for (const pl of allPlNames) {
         const c = flowTracks.filter(t => t.playlist === pl).length;
         const safePl = pl.replace(/'/g, "\\'");
-        plHtml += '<span class="flow-pl-chip' + (flowCurrentPlaylist === pl ? ' active' : '') + '" onclick="flowFilterPlaylist(\'' + safePl + '\', this)" ondragover="event.preventDefault(); this.classList.add(\'flow-pl-dragover\')" ondragleave="this.classList.remove(\'flow-pl-dragover\')" ondrop="this.classList.remove(\'flow-pl-dragover\'); flowDropOnPlaylist(event, \'' + safePl + '\')">'
+        const meta = flowPlaylists.find(p => p.name === pl) || {};
+        const styleParts = [];
+        if (meta.color) styleParts.push('background:' + meta.color);
+        if (meta.textColor) styleParts.push('color:' + meta.textColor);
+        const styleAttr = styleParts.length ? ' style="' + styleParts.join(';') + '"' : '';
+        plHtml += '<span class="flow-pl-chip' + (flowCurrentPlaylist === pl ? ' active' : '') + '"' + styleAttr + ' onclick="flowFilterPlaylist(\'' + safePl + '\', this)" ondragover="event.preventDefault(); this.classList.add(\'flow-pl-dragover\')" ondragleave="this.classList.remove(\'flow-pl-dragover\')" ondrop="this.classList.remove(\'flow-pl-dragover\'); flowDropOnPlaylist(event, \'' + safePl + '\')">'
             + pl + ' (' + c + ')'
             + '<span class="flow-pl-play" onclick="event.stopPropagation(); flowPlayAll(\'' + safePl + '\')" title="Tout lire">&#9654;</span>'
+            + '<span class="flow-pl-color" onclick="event.stopPropagation(); flowOpenColorPicker(\'' + safePl + '\', this)" title="Couleur">&#127912;</span>'
             + '<span class="flow-pl-del" onclick="event.stopPropagation(); flowDeletePlaylist(\'' + safePl + '\')" title="Supprimer">&times;</span>'
             + '</span>';
     }
     plDiv.innerHTML = plHtml;
 
     // Filtrer
-    const filtered = flowTracks.filter((t, i) => {
-        const matchPl = !flowCurrentPlaylist || (flowCurrentPlaylist === '__none__' ? !t.playlist : t.playlist === flowCurrentPlaylist);
+    let filtered = flowTracks.filter((t, i) => {
+        const matchPl = flowViewMode || !flowCurrentPlaylist || (flowCurrentPlaylist === '__none__' ? !t.playlist : t.playlist === flowCurrentPlaylist);
         const matchSearch = !search || (t.title || '').toLowerCase().includes(search) || (t.channel || '').toLowerCase().includes(search);
-        return matchPl && matchSearch;
+        const matchView = !flowViewMode
+            || (flowViewMode === 'liked' && t.liked)
+            || (flowViewMode === 'top' && (t.playCount || 0) > 0)
+            || flowViewMode === 'recent';
+        return matchPl && matchSearch && matchView;
     });
 
-    countEl.textContent = filtered.length + ' titre(s)';
+    // Vues rapides : tri et limite
+    if (flowViewMode === 'top') {
+        filtered = [...filtered].sort((a, b) => (b.playCount || 0) - (a.playCount || 0)).slice(0, 20);
+    } else if (flowViewMode === 'recent') {
+        filtered = [...filtered].sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || '')).slice(0, 20);
+    }
+
+    countEl.innerHTML = `<span class="ftc-count">${filtered.length} titre${filtered.length > 1 ? 's' : ''}</span>` + flowFormatTotalDuration(filtered);
 
     if (filtered.length === 0) {
         list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:30px;">Aucun titre. Ajoute des morceaux depuis l\'historique ou importe une liste.</p>';
@@ -3476,6 +5061,7 @@ function renderFlow() {
             + ((t.playCount || 0) > 0 ? '<span class="fl-plays-badge">' + t.playCount + 'x</span>' : '')
             + '</div>'
             + (flowPlaylists.length > 0 ? '<select class="fl-move-select" onchange="flowMoveTrack(\'' + t.id + '\', this.value); this.selectedIndex=0;">' + plOptions + '</select>' : '')
+            + '<button class="fl-like' + (t.liked ? ' liked' : '') + '" onclick="flowToggleLike(\'' + t.id + '\', this)" title="' + (t.liked ? 'Retirer des aim&eacute;s' : 'Aimer') + '">' + (t.liked ? '&#10084;' : '&#9825;') + '</button>'
             + '<button class="fl-play" onclick="flowPlay(' + realIdx + ',\'audio\')">&#9654; Ecouter</button>'
             + '<button class="fl-play fl-play-vid" onclick="flowPlay(' + realIdx + ',\'video\')">&#9654; Video</button>'
             + (inLib
@@ -3560,12 +5146,44 @@ function sortFlow() {
 
 function flowFilterPlaylist(pl, el) {
     flowCurrentPlaylist = pl;
+    flowViewMode = '';
     document.querySelectorAll('.flow-pl-chip').forEach(c => c.classList.remove('active'));
     if (el) el.classList.add('active');
     renderFlow();
 }
 
+function flowSetViewMode(mode, el) {
+    // Toggle si on reclique le meme chip
+    flowViewMode = (flowViewMode === mode) ? '' : mode;
+    flowCurrentPlaylist = '';
+    document.querySelectorAll('.flow-pl-chip').forEach(c => c.classList.remove('active'));
+    if (flowViewMode && el) el.classList.add('active');
+    renderFlow();
+}
+
 function filterFlow() { renderFlow(); }
+
+async function flowToggleLike(id, btn) {
+    console.log('[LIKE FLOW] click id=', id);
+    try {
+        const resp = await fetch('api/flow', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=toggle_like&id=' + encodeURIComponent(id)
+        });
+        const data = await resp.json();
+        console.log('[LIKE FLOW] response', resp.status, data);
+        if (!data.success) { alert('Like refuse par le serveur : ' + (data.error || 'inconnu')); return; }
+        const track = flowTracks.find(t => t.id === id);
+        if (track) track.liked = data.liked;
+        if (btn) {
+            btn.innerHTML = data.liked ? '&#10084;' : '&#9825;';
+            btn.classList.toggle('liked', !!data.liked);
+            btn.title = data.liked ? 'Retirer des aimés' : 'Aimer';
+        }
+        // Rafraichir le chip (compteur) et la liste si on est en vue Aimes
+        renderFlow();
+    } catch (e) { console.error('[LIKE FLOW] erreur reseau', e); alert('Erreur reseau: ' + e.message); }
+}
 
 async function flowPlay(idx, type) {
     const t = flowTracks[idx];
@@ -3581,6 +5199,7 @@ async function flowPlay(idx, type) {
 
     flowCurrentIdx = idx;
     flowCurrentType = type || 'audio';
+    playbackContext = 'flow';
 
     // Afficher le player bar
     bar.classList.add('active');
@@ -3643,6 +5262,8 @@ async function flowPlay(idx, type) {
 
         mainAudio.src = streamUrl;
         mainAudio.volume = document.getElementById('volumeSlider').value / 100;
+        _streamRetryCount = 0;
+        _streamRetrying = false;
         mainAudio.play().catch(() => {});
 
         document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Streaming';
@@ -3717,6 +5338,7 @@ function flowStop() {
     document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
     flowCurrentIdx = -1;
     flowPreloaded = null;
+    playbackContext = 'library';
 }
 
 function flowPreloadNext(currentIdx, type) {
@@ -3740,6 +5362,139 @@ function flowPreloadNext(currentIdx, type) {
             }
         })
         .catch(() => { flowPreloaded = null; });
+}
+
+const FLOW_COLOR_PRESETS_BG = [
+    '', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#009688',
+    '#4CAF50', '#FF9800', '#FF5722', '#E91E63', '#795548', '#607D8B'
+];
+const FLOW_COLOR_PRESETS_FG = [
+    '', '#ffffff', '#000000', '#ffeb3b', '#cddc39', '#80deea', '#f8bbd0', '#bcaaa4'
+];
+
+function flowOpenColorPicker(playlistName, anchor) {
+    const old = document.getElementById('flowColorPopover');
+    if (old) old.remove();
+    if (anchor && anchor.dataset.open === '1') { anchor.dataset.open = '0'; return; }
+
+    const meta = flowPlaylists.find(p => p.name === playlistName) || {};
+    const curBg = meta.color || '';
+    const curFg = meta.textColor || '';
+
+    const swatch = (color, current, kind) => {
+        const sel = (color || '') === (current || '') ? ' selected' : '';
+        const style = color ? `background:${color}` : 'background:repeating-linear-gradient(45deg,#666 0 4px,#888 4px 8px)';
+        return `<button class="fcp-swatch${sel}" style="${style}" data-color="${color}" data-kind="${kind}" title="${color || 'Aucune'}"></button>`;
+    };
+
+    const pop = document.createElement('div');
+    pop.id = 'flowColorPopover';
+    pop.className = 'flow-color-popover';
+    pop.innerHTML = `
+        <div class="fcp-row">
+            <div class="fcp-label">Fond</div>
+            <div class="fcp-swatches">${FLOW_COLOR_PRESETS_BG.map(c => swatch(c, curBg, 'bg')).join('')}</div>
+            <input type="color" class="fcp-custom" data-kind="bg" value="${curBg || '#9C27B0'}" title="Couleur personnalisee">
+        </div>
+        <div class="fcp-row">
+            <div class="fcp-label">Texte</div>
+            <div class="fcp-swatches">${FLOW_COLOR_PRESETS_FG.map(c => swatch(c, curFg, 'fg')).join('')}</div>
+            <input type="color" class="fcp-custom" data-kind="fg" value="${curFg || '#ffffff'}" title="Couleur personnalisee">
+        </div>
+        <div class="fcp-preview-row">
+            <span class="fcp-preview" id="fcpPreview" style="${curBg ? 'background:' + curBg + ';' : ''}${curFg ? 'color:' + curFg : ''}">${playlistName.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}</span>
+        </div>
+        <div class="fcp-actions">
+            <button class="fcp-btn-reset" onclick="flowApplyColor('${playlistName.replace(/'/g, "\\'")}', '', '')">Reinitialiser</button>
+            <button class="fcp-btn-save" onclick="flowSaveColorFromPopover('${playlistName.replace(/'/g, "\\'")}')">Enregistrer</button>
+            <button class="fcp-btn-cancel" onclick="document.getElementById('flowColorPopover').remove()">Annuler</button>
+        </div>
+    `;
+    document.body.appendChild(pop);
+    if (anchor) {
+        const r = anchor.getBoundingClientRect();
+        const popW = 320;
+        let left = r.left + window.scrollX;
+        if (left + popW > window.innerWidth - 10) left = window.innerWidth - popW - 10;
+        pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+        pop.style.left = left + 'px';
+        anchor.dataset.open = '1';
+    }
+
+    pop.querySelectorAll('.fcp-swatch').forEach(b => {
+        b.addEventListener('click', () => {
+            pop.querySelectorAll(`.fcp-swatch[data-kind="${b.dataset.kind}"]`).forEach(s => s.classList.remove('selected'));
+            b.classList.add('selected');
+            if (b.dataset.color) {
+                const customInput = pop.querySelector(`.fcp-custom[data-kind="${b.dataset.kind}"]`);
+                if (customInput) customInput.value = b.dataset.color;
+            }
+            flowUpdateColorPreview();
+        });
+    });
+    pop.querySelectorAll('.fcp-custom').forEach(input => {
+        input.addEventListener('input', () => {
+            pop.querySelectorAll(`.fcp-swatch[data-kind="${input.dataset.kind}"]`).forEach(s => s.classList.remove('selected'));
+            flowUpdateColorPreview();
+        });
+    });
+
+    setTimeout(() => {
+        document.addEventListener('click', flowColorPopoverDismiss, { once: true });
+    }, 50);
+}
+
+function flowColorPopoverDismiss(e) {
+    const pop = document.getElementById('flowColorPopover');
+    if (!pop) return;
+    if (pop.contains(e.target)) {
+        document.addEventListener('click', flowColorPopoverDismiss, { once: true });
+        return;
+    }
+    if (e.target.closest('.flow-pl-color')) return;
+    pop.remove();
+    document.querySelectorAll('.flow-pl-color[data-open="1"]').forEach(el => el.dataset.open = '0');
+}
+
+function flowUpdateColorPreview() {
+    const pop = document.getElementById('flowColorPopover');
+    if (!pop) return;
+    const sel = (kind) => {
+        const swatchSel = pop.querySelector(`.fcp-swatch[data-kind="${kind}"].selected`);
+        if (swatchSel) return swatchSel.dataset.color;
+        const custom = pop.querySelector(`.fcp-custom[data-kind="${kind}"]`);
+        return custom ? custom.value : '';
+    };
+    const bg = sel('bg'), fg = sel('fg');
+    const preview = pop.querySelector('#fcpPreview');
+    if (preview) {
+        preview.style.background = bg || '';
+        preview.style.color = fg || '';
+    }
+}
+
+function flowSaveColorFromPopover(playlistName) {
+    const pop = document.getElementById('flowColorPopover');
+    if (!pop) return;
+    const sel = (kind) => {
+        const swatchSel = pop.querySelector(`.fcp-swatch[data-kind="${kind}"].selected`);
+        if (swatchSel) return swatchSel.dataset.color;
+        const custom = pop.querySelector(`.fcp-custom[data-kind="${kind}"]`);
+        return custom ? custom.value : '';
+    };
+    flowApplyColor(playlistName, sel('bg'), sel('fg'));
+}
+
+async function flowApplyColor(playlistName, bg, fg) {
+    try {
+        const body = new URLSearchParams({ action: 'set_playlist_color', name: playlistName, bg: bg || '', fg: fg || '' });
+        const resp = await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+        const data = await resp.json();
+        if (!data.success) { alert('Erreur : ' + (data.error || 'inconnue')); return; }
+        const pop = document.getElementById('flowColorPopover');
+        if (pop) pop.remove();
+        loadFlow();
+    } catch (e) { alert('Erreur : ' + e.message); }
 }
 
 function flowShowCreatePlaylist() {
@@ -4027,8 +5782,149 @@ async function flowDownload(idx, btn) {
 }
 
 async function flowRemove(id) {
-    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=remove&id=' + id });
+    const track = flowTracks.find(t => t.id === id);
+    const title = track ? (track.title || '(sans titre)') : 'ce titre';
+    confirmDialog({
+        title: 'Retirer ce titre ?',
+        message: `<div style="margin-bottom:8px;">Tu vas retirer :</div><div style="background:var(--bg-hover);padding:10px 14px;border-radius:8px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;">${title.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}</div><div style="margin-top:12px;font-size:12px;color:var(--text-muted);">&#9432; Le titre est place dans la <b>corbeille</b> et reste recuperable pendant <b>24h</b>.</div>`,
+        confirmText: 'Retirer',
+        confirmStyle: 'danger',
+        onConfirm: async () => {
+            await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=remove&id=' + id });
+            showToast('Titre place dans la corbeille (24h pour le restaurer)');
+            loadFlow();
+        }
+    });
+}
+
+function confirmDialog(opts) {
+    const old = document.getElementById('confirmDialog');
+    if (old) old.remove();
+    const cfg = Object.assign({
+        title: 'Confirmation',
+        message: '',
+        confirmText: 'Confirmer',
+        cancelText: 'Annuler',
+        confirmStyle: 'primary',
+        onConfirm: () => {},
+        onCancel: () => {}
+    }, opts || {});
+
+    const confirmBg = cfg.confirmStyle === 'danger' ? 'var(--error,#f44336)' : 'var(--primary)';
+    const div = document.createElement('div');
+    div.id = 'confirmDialog';
+    div.className = 'modal-overlay active';
+    div.innerHTML = `
+        <div class="modal confirm-modal">
+            <h3 style="margin-top:0;margin-bottom:12px;font-size:17px;">${cfg.title}</h3>
+            <div style="font-size:13px;color:var(--text);margin-bottom:18px;">${cfg.message}</div>
+            <div class="modal-btns">
+                <button class="btn-cancel" id="cdlgCancel">${cfg.cancelText}</button>
+                <button id="cdlgConfirm" style="background:${confirmBg};color:#fff;border:none;border-radius:20px;font-weight:600;">${cfg.confirmText}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
+    const close = () => { div.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => {
+        if (e.key === 'Escape') { cfg.onCancel(); close(); }
+        else if (e.key === 'Enter') { cfg.onConfirm(); close(); }
+    };
+    div.querySelector('#cdlgCancel').onclick = () => { cfg.onCancel(); close(); };
+    div.querySelector('#cdlgConfirm').onclick = () => { cfg.onConfirm(); close(); };
+    div.onclick = (e) => { if (e.target === div) { cfg.onCancel(); close(); } };
+    document.addEventListener('keydown', onKey);
+    setTimeout(() => div.querySelector('#cdlgConfirm').focus(), 30);
+}
+
+async function flowOpenTrash() {
+    let modal = document.getElementById('flowTrashModal');
+    if (modal) modal.remove();
+
+    let items = [];
+    try {
+        const resp = await fetch('api/flow?action=trash_list');
+        const data = await resp.json();
+        if (data.success) items = data.items || [];
+    } catch (e) { alert('Erreur : ' + e.message); return; }
+
+    const fmtRemaining = (ms) => {
+        if (ms <= 0) return 'expire';
+        const totalSec = Math.floor(ms / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        const pad = (n) => String(n).padStart(2, '0');
+        if (h > 0) return `${h}h ${pad(m)}min ${pad(s)}s`;
+        if (m > 0) return `${m}min ${pad(s)}s`;
+        return `${s}s`;
+    };
+    const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+    const rows = items.length ? items.map(it => {
+        const exp = fmtRemaining(it.remainingMs);
+        const cls = it.remainingMs < 3600000 ? ' trash-row-warn' : '';
+        return `<div class="trash-row${cls}">
+            <div class="trash-info">
+                <div class="trash-title" title="${esc(it.title || '')}">${esc(it.title || '(sans titre)')}</div>
+                <div class="trash-meta">${esc(it.channel || '')} ${it.playlist ? '&middot; <em>' + esc(it.playlist) + '</em>' : ''} &middot; supprime le ${esc(it.deletedAt || '')}</div>
+                <div class="trash-countdown">&#9201; ${exp} restant avant suppression definitive</div>
+            </div>
+            <div class="trash-actions">
+                <button onclick="flowTrashRestore('${it.id}')" class="trash-btn trash-btn-restore" title="Restaurer">&#8634; Restaurer</button>
+                <button onclick="flowTrashDelete('${it.id}')" class="trash-btn trash-btn-delete" title="Supprimer definitivement">&#128465;</button>
+            </div>
+        </div>`;
+    }).join('') : '<div style="text-align:center;padding:30px;color:var(--text-muted);">La corbeille est vide.</div>';
+
+    const html = `
+        <div class="modal-overlay active" id="flowTrashModal">
+            <div class="modal" style="width:560px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <h3 style="margin:0;">Corbeille de Mon Flow</h3>
+                    <button class="btn-cancel" onclick="document.getElementById('flowTrashModal').remove()" style="padding:6px 14px;font-size:13px;">Fermer</button>
+                </div>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Les titres retires sont conserves <b>24h</b> avant suppression definitive. Tu peux les restaurer ou les supprimer manuellement.</p>
+                <div style="flex:1;overflow-y:auto;margin-bottom:12px;">${rows}</div>
+                ${items.length ? '<button class="btn-cancel" onclick="flowTrashClear()" style="background:var(--error,#f44336);color:#fff;border-color:var(--error,#f44336);">Vider la corbeille</button>' : ''}
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function flowTrashRestore(id) {
+    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=trash_restore&id=' + id });
+    showToast('Titre restaure');
+    document.getElementById('flowTrashModal')?.remove();
     loadFlow();
+}
+
+function flowTrashDelete(id) {
+    confirmDialog({
+        title: 'Supprimer definitivement ?',
+        message: 'Ce titre sera retire de la corbeille et <b>ne pourra plus etre restaure</b>.',
+        confirmText: 'Supprimer',
+        confirmStyle: 'danger',
+        onConfirm: async () => {
+            await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=trash_delete&id=' + id });
+            flowOpenTrash();
+        }
+    });
+}
+
+function flowTrashClear() {
+    confirmDialog({
+        title: 'Vider la corbeille ?',
+        message: 'Tous les titres de la corbeille seront <b>supprimes definitivement</b>. Cette action est irreversible.',
+        confirmText: 'Vider la corbeille',
+        confirmStyle: 'danger',
+        onConfirm: async () => {
+            await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=trash_clear' });
+            showToast('Corbeille videe');
+            document.getElementById('flowTrashModal')?.remove();
+        }
+    });
 }
 
 async function flowAddFromHistory() {

@@ -119,13 +119,23 @@ router.get('/play', async (req, res) => {
         };
         if (rangeHeader) headers['Range'] = rangeHeader;
 
-        const proxyReq = client.get(streamUrl, { headers }, (proxyRes) => {
+        const proxyReq = client.get(streamUrl, { headers, timeout: 30000 }, (proxyRes) => {
+            // Si YouTube renvoie une erreur (ex: URL expiree), invalider le cache
+            if (proxyRes.statusCode >= 400) {
+                const cacheKey = url + ':' + type;
+                streamCache.delete(cacheKey);
+                if (!res.headersSent) res.status(proxyRes.statusCode).send('Flux indisponible');
+                proxyRes.resume();
+                return;
+            }
+
             const contentType = type === 'video' ? 'video/mp4' : 'audio/mp4';
 
             const resHeaders = {
                 'Content-Type': contentType,
                 'Accept-Ranges': 'bytes',
-                'Cache-Control': 'no-cache'
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive'
             };
 
             if (proxyRes.headers['content-length']) {
@@ -137,6 +147,15 @@ router.get('/play', async (req, res) => {
 
             res.writeHead(proxyRes.statusCode, resHeaders);
             proxyRes.pipe(res);
+
+            proxyRes.on('error', () => {
+                if (!res.destroyed) res.end();
+            });
+        });
+
+        proxyReq.on('timeout', () => {
+            proxyReq.destroy();
+            if (!res.headersSent) res.status(504).send('Timeout du flux');
         });
 
         proxyReq.on('error', () => {

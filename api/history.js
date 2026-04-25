@@ -3,6 +3,9 @@ const fs = require('fs');
 const config = require('../config');
 const router = express.Router();
 
+let statsRecord = null;
+try { statsRecord = require('./stats').recordEvent; } catch (e) { /* stats module optionnel */ }
+
 function loadHistory() {
     try { return JSON.parse(fs.readFileSync(config.HISTORY_FILE, 'utf8')); }
     catch (e) { return []; }
@@ -22,7 +25,7 @@ router.all('/', (req, res) => {
 
         case 'add': {
             const history = loadHistory();
-            history.unshift({
+            const entry = {
                 title: req.body.title || '',
                 status: req.body.status || 'success',
                 format: req.body.format || '',
@@ -36,8 +39,19 @@ router.all('/', (req, res) => {
                 thumbnail: req.body.thumbnail || '',
                 source: req.body.source || 'local',
                 date: new Date().toISOString().replace('T', ' ').substring(0, 19)
-            });
+            };
+            history.unshift(entry);
             saveHistory(history.slice(0, 200));
+            if (statsRecord && entry.status === 'success') {
+                try {
+                    statsRecord({
+                        ts: entry.date, kind: 'dl',
+                        source: entry.type === 'video' ? 'video' : 'audio',
+                        title: entry.title, channel: entry.channel,
+                        url: entry.url, format: entry.format
+                    });
+                } catch (e) { /* stats best-effort */ }
+            }
             res.json({ success: true });
             break;
         }
