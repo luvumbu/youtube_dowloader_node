@@ -55,6 +55,1280 @@ function notifyDone(title) {
         new Notification('Telechargement termine', { body: title, icon: 'youtube.ico' });
     }
 }
+
+// Notif desktop quand un nouveau titre demarre dans Mon Flow
+let _lastFlowNotif = null;
+function notifyFlowTrack(track) {
+    if (!track) return;
+    if (localStorage.getItem('yt_flow_notif_on') !== '1') return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    // Eviter les doublons (cas de spam de play() rapide)
+    if (_lastFlowNotif && _lastFlowNotif.id === track.id && (Date.now() - _lastFlowNotif.ts) < 1500) return;
+    // Pas de notif si la fenetre est focus (l'utilisateur voit deja le player)
+    if (document.hasFocus && document.hasFocus()) return;
+    _lastFlowNotif = { id: track.id, ts: Date.now() };
+    let icon = track.thumbnail || '';
+    if (!icon && track.url) {
+        const m = track.url.match(/[?&]v=([^&]+)/);
+        if (m) icon = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg';
+    }
+    try {
+        const n = new Notification(track.title || 'Lecture en cours', {
+            body: (track.channel || '') + (track.duration ? '  -  ' + track.duration : ''),
+            icon: icon || 'youtube.ico',
+            tag: 'yt-flow-track',
+            silent: true
+        });
+        setTimeout(() => { try { n.close(); } catch (e) {} }, 6000);
+        n.onclick = () => { try { window.focus(); n.close(); } catch (e) {} };
+    } catch (e) {}
+}
+
+// ===== DESCRIPTION YOUTUBE (chapitres / tracklist / texte / infos) =====
+let _descCurrentUrl = null;
+let _descData = null;
+let _descTab = 'chapters';
+
+function isDescPanelOpen() {
+    const p = document.getElementById('descPanel');
+    return p && p.style.display !== 'none';
+}
+
+function toggleDescriptionPanel() {
+    const p = document.getElementById('descPanel');
+    const btn = document.getElementById('btnPlayerDesc');
+    if (!p) return;
+    if (p.style.display === 'none') {
+        // Fermer les autres panneaux du player bar
+        const lp = document.getElementById('lyricsPanel');
+        if (lp && lp.style.display !== 'none') {
+            lp.style.display = 'none';
+            const lpBtn = document.getElementById('btnPlayerLyrics');
+            if (lpBtn) lpBtn.classList.remove('active');
+        }
+        const queue = document.getElementById('playerQueue');
+        if (queue && queue.style.display !== 'none') {
+            queue.style.display = 'none';
+            const qbtn = document.querySelector('.player-queue-btn:not(#btnPlayerLyrics):not(#btnPlayerDesc)');
+            if (qbtn) qbtn.classList.remove('active');
+        }
+        p.style.display = 'flex';
+        if (btn) btn.classList.add('active');
+        loadDescriptionForCurrent();
+    } else {
+        p.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+    }
+}
+
+function getCurrentTrackForDesc() {
+    if (typeof getCurrentTrackForLyrics === 'function') return getCurrentTrackForLyrics();
+    return null;
+}
+
+async function loadDescriptionForCurrent() {
+    const t = getCurrentTrackForDesc();
+    const body = document.getElementById('dpBody');
+    const titleEl = document.getElementById('dpTitle');
+    if (!body) return;
+    if (!t || !t.url) {
+        body.innerHTML = '<div class="dp-empty">Aucun titre en cours</div>';
+        if (titleEl) titleEl.textContent = 'Description';
+        _descData = null; _descCurrentUrl = null;
+        return;
+    }
+    if (titleEl) titleEl.textContent = t.title || 'Description';
+    if (_descCurrentUrl === t.url && _descData) {
+        renderDescPanel();
+        return;
+    }
+    // Reset transcript car URL change
+    _descTranscript = null;
+    _descTranscriptLoaded = false;
+    _descTranscriptUrl = null;
+    body.innerHTML = '<div class="dp-loading"><div class="dp-spinner"></div><div>Recuperation de la description...</div></div>';
+    try {
+        const data = await apiCall('api/description?url=' + encodeURIComponent(t.url));
+        if (!data || !data.success) {
+            body.innerHTML = '<div class="dp-empty">Impossible de recuperer la description : ' + escapeHtml((data && data.error) || 'erreur') + '</div>';
+            return;
+        }
+        _descCurrentUrl = t.url;
+        _descData = data;
+        // Auto-bascule vers l'onglet le plus utile disponible
+        const hasChapters = Array.isArray(data.chapters) && data.chapters.length > 0;
+        const tracklistFound = extractTracklist(data.description || '').length >= 2;
+        if (!hasChapters) {
+            if (tracklistFound) {
+                dpSetTab('tracklist');
+                return;
+            } else {
+                // Pas de chapitres ni tracklist : aller direct sur Transcription
+                dpSetTab('transcript');
+                return;
+            }
+        }
+        renderDescPanel();
+    } catch (e) {
+        body.innerHTML = '<div class="dp-empty">Erreur reseau : ' + escapeHtml(e.message || '') + '</div>';
+    }
+}
+
+function dpSetTab(tab) {
+    _descTab = tab;
+    document.querySelectorAll('.dp-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    if (tab === 'transcript' && !_descTranscriptLoaded) {
+        loadDescTranscript();
+        return; // renderDescPanel sera appele apres
+    }
+    renderDescPanel();
+}
+
+let _descTranscript = null; // { lang, lines: [{ts, text}] }
+let _descTranscriptLoaded = false;
+let _descTranscriptUrl = null;
+
+async function loadDescTranscript() {
+    const t = getCurrentTrackForDesc();
+    const body = document.getElementById('dpBody');
+    if (!body || !t || !t.url) return;
+    if (_descTranscriptUrl === t.url && _descTranscript) {
+        _descTranscriptLoaded = true;
+        renderDescPanel();
+        return;
+    }
+    body.innerHTML = '<div class="dp-loading"><div class="dp-spinner"></div><div>Recuperation des sous-titres YouTube (peut prendre 5-10s)...</div></div>';
+    try {
+        const data = await apiCall('api/description/transcript?url=' + encodeURIComponent(t.url));
+        if (!data || !data.success) {
+            _descTranscript = null;
+            _descTranscriptLoaded = true;
+            _descTranscriptUrl = t.url;
+            renderDescPanel();
+            return;
+        }
+        _descTranscript = { lang: data.lang || '', lines: data.lines || [] };
+        _descTranscriptUrl = t.url;
+        _descTranscriptLoaded = true;
+        renderDescPanel();
+    } catch (e) {
+        _descTranscript = null;
+        _descTranscriptLoaded = true;
+        renderDescPanel();
+    }
+}
+
+// Detecte les timecodes dans une chaine : 00:00, 0:00, 0:00:00, 00:00:00
+function parseTimecode(str) {
+    const m = String(str).trim().match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = parseInt(m[1] || '0', 10);
+    const mi = parseInt(m[2], 10);
+    const s = parseInt(m[3], 10);
+    return h * 3600 + mi * 60 + s;
+}
+
+// Normalise une chaine pour comparaison (lower + sans ponctuation + espaces uniques)
+function _dpNorm(s) {
+    return (s || '').toString().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+}
+
+// Extrait toutes les lignes "TIMECODE Texte" d'un texte
+function extractTracklist(text) {
+    if (!text) return [];
+    const lines = text.split(/\r?\n/);
+    const items = [];
+    const re = /^[\s​\-\*\.]*((?:\d{1,2}:)?\d{1,2}:\d{2})[\s\.\-\)\]>:]*(.*)$/;
+    for (const line of lines) {
+        const m = line.match(re);
+        if (!m) continue;
+        const ts = parseTimecode(m[1]);
+        const txt = (m[2] || '').trim();
+        if (ts === null) continue;
+        if (!txt) continue;
+        items.push({ ts, label: txt });
+    }
+    // Dedup : meme label normalise OU meme timestamp -> on garde une seule occurrence (la 1ere)
+    const seenLabel = new Set();
+    const seenTs = new Set();
+    const dedup = [];
+    for (const it of items) {
+        const n = _dpNorm(it.label);
+        if (!n) continue;
+        if (seenLabel.has(n)) continue;
+        if (seenTs.has(it.ts)) continue;
+        seenLabel.add(n); seenTs.add(it.ts);
+        dedup.push(it);
+    }
+    // Filtrer : il faut au moins 2 entrees pour considerer comme tracklist
+    if (dedup.length < 2) return [];
+    return dedup;
+}
+
+// Dedup des chapitres YouTube (rare mais possible)
+function dedupChapters(chapters) {
+    if (!Array.isArray(chapters) || !chapters.length) return [];
+    const seenTitle = new Set();
+    const seenStart = new Set();
+    const out = [];
+    for (const c of chapters) {
+        const start = c.start_time || 0;
+        const norm = _dpNorm(c.title || '');
+        // Meme timestamp = doublon strict
+        if (seenStart.has(start)) continue;
+        // Meme titre consecutif = doublon (sinon on garde, ex: "Chorus" peut revenir)
+        const last = out[out.length - 1];
+        if (last && _dpNorm(last.title || '') === norm && norm) continue;
+        seenStart.add(start); seenTitle.add(norm);
+        out.push(c);
+    }
+    return out;
+}
+
+// Dedup des lignes consecutives identiques dans un texte
+function dedupTextLines(txt) {
+    if (!txt) return '';
+    const lines = txt.split(/\r?\n/);
+    const out = [];
+    let prevNorm = null;
+    for (const l of lines) {
+        const n = _dpNorm(l);
+        // Garde les lignes vides telles quelles (separation visuelle)
+        if (!n) { out.push(l); prevNorm = null; continue; }
+        if (n === prevNorm) continue; // doublon consecutif
+        out.push(l);
+        prevNorm = n;
+    }
+    return out.join('\n');
+}
+
+function dpSeekTo(seconds) {
+    const a = (typeof getActiveAudio === 'function') ? getActiveAudio() : null;
+    if (a && a.duration && isFinite(a.duration)) {
+        if (typeof cancelCrossfade === 'function' && typeof isCrossfading === 'function' && isCrossfading()) {
+            cancelCrossfade('commit');
+        }
+        a.currentTime = Math.max(0, Math.min(a.duration, seconds));
+    }
+}
+
+function _dpClipboardWrite(text, okMsg) {
+    if (!text || !text.trim()) { showToast('Rien a copier'); return; }
+    const done = () => showToast(okMsg);
+    const fail = () => showToast('Erreur lors de la copie');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fail);
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { fail(); }
+        document.body.removeChild(ta);
+    }
+}
+
+function dpCopyTab(kind) {
+    if (!_descData) return;
+    const d = _descData;
+    let text = '', okMsg = 'Copie';
+    if (kind === 'chapters') {
+        const chapters = dedupChapters(d.chapters);
+        if (!chapters.length) { showToast('Aucun chapitre a copier'); return; }
+        text = chapters.map((c, i) => '#' + (i + 1) + '  ' + fmtSec(c.start_time || 0) + '  ' + (c.title || '(sans titre)')).join('\n');
+        okMsg = chapters.length + ' chapitres copies';
+    } else if (kind === 'tracklist') {
+        const items = extractTracklist(d.description || '');
+        if (!items.length) { showToast('Pas de tracklist a copier'); return; }
+        text = items.map((it, i) => (i + 1) + '. ' + fmtSec(it.ts) + ' - ' + it.label).join('\n');
+        okMsg = items.length + ' titres copies';
+    } else if (kind === 'transcript') {
+        if (!_descTranscript || !_descTranscript.lines || !_descTranscript.lines.length) { showToast('Pas de transcription a copier'); return; }
+        text = _descTranscript.lines.map(l => '[' + fmtSec(l.ts) + '] ' + l.text).join('\n');
+        okMsg = _descTranscript.lines.length + ' segments copies';
+    } else if (kind === 'transcript-plain') {
+        if (!_descTranscript || !_descTranscript.lines || !_descTranscript.lines.length) { showToast('Pas de transcription a copier'); return; }
+        text = _descTranscript.lines.map(l => l.text).join(' ').replace(/\s+/g, ' ').trim();
+        okMsg = 'Transcription copiee (texte brut)';
+    } else if (kind === 'text') {
+        text = dedupTextLines(d.description || '').trim();
+        if (!text) { showToast('Description vide'); return; }
+        okMsg = 'Description copiee';
+    } else if (kind === 'info') {
+        const fmtDate = (s) => s && s.length === 8 ? s.slice(6, 8) + '/' + s.slice(4, 6) + '/' + s.slice(0, 4) : (s || '');
+        const lines = [];
+        lines.push('Titre : ' + (d.title || ''));
+        lines.push('Chaine : ' + (d.channel || ''));
+        lines.push('Duree : ' + fmtSec(d.duration));
+        if (d.view_count) lines.push('Vues : ' + d.view_count);
+        if (d.like_count) lines.push("J'aime : " + d.like_count);
+        if (d.upload_date) lines.push('Publiee le : ' + fmtDate(d.upload_date));
+        if (d.categories && d.categories.length) lines.push('Categorie : ' + d.categories.join(', '));
+        if (d.tags && d.tags.length) lines.push('Tags : ' + d.tags.join(', '));
+        text = lines.join('\n');
+        okMsg = 'Infos copiees';
+    }
+    _dpClipboardWrite(text, okMsg);
+}
+
+// Compat
+function dpCopyTracklist() { dpCopyTab('tracklist'); }
+
+function fmtSec(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+    return m + ':' + String(r).padStart(2, '0');
+}
+
+// Linkifie URLs dans un texte
+function linkify(text) {
+    return escapeHtml(text).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+
+function renderDescPanel() {
+    const body = document.getElementById('dpBody');
+    if (!body || !_descData) return;
+    const d = _descData;
+
+    if (_descTab === 'chapters') {
+        const chapters = dedupChapters(d.chapters);
+        if (chapters.length) {
+            body.innerHTML = '<div class="dp-section">'
+                + '<div class="dp-hint dp-hint-row">'
+                + '<span>Chapitres detectes par YouTube (' + chapters.length + '). Clic = aller a ce moment.</span>'
+                + '<button class="dp-copy-btn" onclick="dpCopyTab(\'chapters\')" title="Copier tous les chapitres">📋 Copier</button>'
+                + '</div>'
+                + chapters.map((c, i) => {
+                    const start = c.start_time || 0;
+                    const end = c.end_time || 0;
+                    const dur = (end > start) ? ' · ' + fmtSec(end - start) : '';
+                    return '<div class="dp-chapter" onclick="dpSeekTo(' + start + ')">'
+                        + '<span class="dp-chap-time">' + fmtSec(start) + '</span>'
+                        + '<span class="dp-chap-num">#' + (i + 1) + '</span>'
+                        + '<span class="dp-chap-title">' + escapeHtml(c.title || '(sans titre)') + '</span>'
+                        + (dur ? '<span class="dp-chap-dur">' + dur.replace(' · ', '') + '</span>' : '')
+                        + '</div>';
+                }).join('') + '</div>';
+        } else {
+            body.innerHTML = '<div class="dp-empty" style="text-align:center;">'
+                + '<div style="font-size:24px;opacity:0.5;margin-bottom:6px;">📑</div>'
+                + 'Le createur de la video n\'a pas pose de chapitres.'
+                + '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;">Bascule sur l\'onglet <strong>🗨 Transcription</strong> pour avoir le contenu parle de la video (auto-sous-titres YouTube).</div>'
+                + '<button onclick="dpSetTab(\'transcript\')" style="margin-top:12px;background:var(--primary);color:#fff;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">🗨 Voir la Transcription</button>'
+                + '</div>';
+        }
+        return;
+    }
+
+    if (_descTab === 'tracklist') {
+        const items = extractTracklist(d.description || '');
+        if (items.length) {
+            body.innerHTML = '<div class="dp-section dp-section--tracklist">'
+                + '<div class="dp-hint dp-hint-row">'
+                + '<span>Tracklist detectee (' + items.length + ' titres). Clic = aller a ce moment.</span>'
+                + '<button class="dp-copy-btn" onclick="dpCopyTracklist()" title="Copier toute la tracklist">📋 Copier</button>'
+                + '</div>'
+                + items.map((it, i) => {
+                    return '<div class="dp-track" onclick="dpSeekTo(' + it.ts + ')">'
+                        + '<span class="dp-track-num">' + (i + 1) + '</span>'
+                        + '<span class="dp-track-main">'
+                        + '<span class="dp-track-title">' + escapeHtml(it.label) + '</span>'
+                        + '<span class="dp-track-time">' + fmtSec(it.ts) + '</span>'
+                        + '</span>'
+                        + '</div>';
+                }).join('') + '</div>';
+        } else {
+            body.innerHTML = '<div class="dp-empty">Pas de tracklist detectee dans la description.<br><span style="font-size:11px;color:var(--text-muted);">Pas de lignes de la forme <code>00:00 Titre</code> trouvees.</span></div>';
+        }
+        return;
+    }
+
+    if (_descTab === 'transcript') {
+        if (!_descTranscriptLoaded) {
+            loadDescTranscript();
+            return;
+        }
+        if (!_descTranscript || !_descTranscript.lines || !_descTranscript.lines.length) {
+            body.innerHTML = '<div class="dp-empty">Pas de sous-titres disponibles pour cette video.<br><span style="font-size:11px;color:var(--text-muted);">YouTube ne fournit pas toujours de transcription auto (ex: musique sans paroles, bruit ambiant uniquement).</span></div>';
+            return;
+        }
+        const lines = _descTranscript.lines;
+        const langLabel = _descTranscript.lang ? ' (' + _descTranscript.lang + ')' : '';
+        body.innerHTML = '<div class="dp-section">'
+            + '<div class="dp-hint dp-hint-row">'
+            + '<span>Transcription auto YouTube' + langLabel + ' - ' + lines.length + ' segments.</span>'
+            + '<span class="dp-copy-group">'
+            + '<button class="dp-copy-btn" onclick="dpCopyTab(\'transcript\')" title="Copier avec timecodes">📋 +TC</button>'
+            + '<button class="dp-copy-btn" onclick="dpCopyTab(\'transcript-plain\')" title="Copier en texte brut (sans timecodes)">📋 Texte</button>'
+            + '</span>'
+            + '</div>'
+            + lines.map(l =>
+                '<div class="dp-tr-line">'
+                + '<span class="dp-tc" onclick="dpSeekTo(' + l.ts + ')">' + fmtSec(l.ts) + '</span>'
+                + '<span class="dp-tr-text">' + escapeHtml(l.text) + '</span>'
+                + '</div>'
+            ).join('') + '</div>';
+        return;
+    }
+
+    if (_descTab === 'text') {
+        const txt = dedupTextLines(d.description || '');
+        if (!txt.trim()) {
+            body.innerHTML = '<div class="dp-empty">Aucune description pour cette video.</div>';
+            return;
+        }
+        // Cliquables : timecodes en debut de ligne + URLs
+        const html = txt.split(/\r?\n/).map(line => {
+            const m = line.match(/^([\s​\-\*\.]*)((?:\d{1,2}:)?\d{1,2}:\d{2})([\s\.\-\)\]>:]*)(.*)$/);
+            if (m) {
+                const ts = parseTimecode(m[2]);
+                if (ts !== null) {
+                    return escapeHtml(m[1])
+                        + '<a class="dp-tc" onclick="dpSeekTo(' + ts + ')">' + escapeHtml(m[2]) + '</a>'
+                        + escapeHtml(m[3]) + linkify(m[4] || '');
+                }
+            }
+            return linkify(line);
+        }).join('<br>');
+        body.innerHTML = '<div class="dp-section">'
+            + '<div class="dp-hint dp-hint-row">'
+            + '<span>Description complete (' + txt.length + ' caracteres).</span>'
+            + '<button class="dp-copy-btn" onclick="dpCopyTab(\'text\')" title="Copier la description complete">📋 Copier</button>'
+            + '</div>'
+            + '<div class="dp-text-content">' + html + '</div>'
+            + '</div>';
+        return;
+    }
+
+    if (_descTab === 'info') {
+        const fmtDate = (s) => s && s.length === 8 ? s.slice(6, 8) + '/' + s.slice(4, 6) + '/' + s.slice(0, 4) : (s || '');
+        const fmtNum = (n) => (n || 0).toLocaleString('fr-FR');
+        body.innerHTML = '<div class="dp-section">'
+            + '<div class="dp-hint dp-hint-row">'
+            + '<span>Metadonnees de la video.</span>'
+            + '<button class="dp-copy-btn" onclick="dpCopyTab(\'info\')" title="Copier toutes les infos">📋 Copier</button>'
+            + '</div>'
+            + '<div class="dp-info">'
+            + '<div class="dp-info-row"><span>Titre</span><strong>' + escapeHtml(d.title) + '</strong></div>'
+            + '<div class="dp-info-row"><span>Chaine</span><strong>' + escapeHtml(d.channel) + '</strong></div>'
+            + '<div class="dp-info-row"><span>Duree</span><strong>' + fmtSec(d.duration) + '</strong></div>'
+            + '<div class="dp-info-row"><span>Vues</span><strong>' + fmtNum(d.view_count) + '</strong></div>'
+            + (d.like_count ? '<div class="dp-info-row"><span>J\'aime</span><strong>' + fmtNum(d.like_count) + '</strong></div>' : '')
+            + (d.upload_date ? '<div class="dp-info-row"><span>Publiee le</span><strong>' + fmtDate(d.upload_date) + '</strong></div>' : '')
+            + (d.categories && d.categories.length ? '<div class="dp-info-row"><span>Categorie</span><strong>' + escapeHtml(d.categories.join(', ')) + '</strong></div>' : '')
+            + (d.tags && d.tags.length ? '<div class="dp-info-row dp-info-tags"><span>Tags</span><div class="dp-tags">' + d.tags.map(t => '<span class="dp-tag">' + escapeHtml(t) + '</span>').join('') + '</div></div>' : '')
+            + '</div>'
+            + '</div>';
+    }
+}
+
+// ===== LYRICS (lrclib.net) =====
+const LYRICS_CACHE_KEY = 'yt_lyrics_cache_v1';
+const LYRICS_CACHE_MAX = 60;
+let _lyricsState = null; // { url, plain, synced: [{ts, text}], current: idx }
+let _lyricsTickerEl = null;
+
+function getLyricsCache() {
+    try { return JSON.parse(localStorage.getItem(LYRICS_CACHE_KEY) || '{}'); }
+    catch (e) { return {}; }
+}
+function setLyricsCache(map) {
+    const keys = Object.keys(map);
+    if (keys.length > LYRICS_CACHE_MAX) {
+        // virer les plus anciens
+        const sorted = keys.sort((a, b) => (map[a]._ts || 0) - (map[b]._ts || 0));
+        sorted.slice(0, keys.length - LYRICS_CACHE_MAX).forEach(k => { delete map[k]; });
+    }
+    try { localStorage.setItem(LYRICS_CACHE_KEY, JSON.stringify(map)); } catch (e) {}
+}
+
+function setLyricsAutoOpen(on) {
+    if (on) localStorage.setItem('yt_lyrics_auto', '1');
+    else localStorage.removeItem('yt_lyrics_auto');
+}
+
+function isLyricsPanelOpen() {
+    const p = document.getElementById('lyricsPanel');
+    return p && p.style.display !== 'none';
+}
+
+function toggleLyricsPanel() {
+    const p = document.getElementById('lyricsPanel');
+    const btn = document.getElementById('btnPlayerLyrics');
+    if (!p) return;
+    if (p.style.display === 'none') {
+        // Fermer la file de lecture si elle est ouverte
+        const queue = document.getElementById('playerQueue');
+        if (queue && queue.style.display !== 'none') {
+            queue.style.display = 'none';
+            const qbtn = document.querySelector('.player-queue-btn:not(#btnPlayerLyrics)');
+            if (qbtn) qbtn.classList.remove('active');
+        }
+        p.style.display = 'flex';
+        if (btn) btn.classList.add('active');
+        const fc = document.getElementById('lpFollowToggle');
+        if (fc) fc.checked = getLyricsAutoFollow();
+        const cm = document.getElementById('lpClickMode');
+        if (cm) cm.value = getLyricsClickMode();
+        loadLyricsForCurrent();
+    } else {
+        p.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+    }
+}
+
+function getCurrentTrackForLyrics() {
+    if (playbackContext === 'flow' && flowCurrentIdx >= 0 && flowTracks[flowCurrentIdx]) {
+        const t = flowTracks[flowCurrentIdx];
+        return { title: t.title, channel: t.channel, url: t.url, duration: t.duration };
+    }
+    if (playbackContext === 'library' && typeof playlist !== 'undefined' && playlist[playIndex]) {
+        const it = getItemById(playlist[playIndex]);
+        if (it) return { title: it.title, channel: it.channel, url: it.url, duration: it.duration };
+    }
+    if (playbackContext === 'search' && typeof lastSearchResults !== 'undefined' && typeof searchPlayIdx !== 'undefined' && lastSearchResults[searchPlayIdx]) {
+        const r = lastSearchResults[searchPlayIdx];
+        return { title: r.title, channel: r.channel, url: r.url, duration: r.duration };
+    }
+    return null;
+}
+
+// Nettoie un titre YouTube : enleve [Official Video], (HD), feat. ..., etc.
+function cleanTitlePart(rawTitle) {
+    let t = (rawTitle || '').trim();
+    t = t.replace(/\s*[\[\(](?:official\s*)?(?:music\s*)?(?:lyric[s]?\s*)?(?:video|audio|hd|hq|4k|mv|m\/v|clip|live|remix|edit|version|extended|visualizer|performance|stream)\b[^\]\)]*[\]\)]/gi, '');
+    t = t.replace(/\s*[\[\(]\s*(?:official|lyrics?|audio|video|hd|hq|4k)\s*[\]\)]/gi, '');
+    t = t.replace(/\s*\(?\s*feat\.?\s+[^)\]]+\)?\]?/gi, '');
+    t = t.replace(/\s*\(?\s*ft\.?\s+[^)\]]+\)?\]?/gi, '');
+    t = t.replace(/\s*\(?\s*prod\.?\s+by\s+[^)\]]+\)?\]?/gi, '');
+    return t.replace(/\s+/g, ' ').trim();
+}
+
+function cleanArtistPart(rawChannel) {
+    let a = (rawChannel || '').trim();
+    a = a.replace(/\s*-?\s*topic\s*$/i, '').replace(/\s*vevo\s*$/i, '').replace(/\s*-?\s*official\s*$/i, '').trim();
+    return a;
+}
+
+// Genere plusieurs combinaisons artiste/titre a essayer en cascade
+function buildLyricsCandidates(rawTitle, rawChannel) {
+    const candidates = [];
+    const cleanT = cleanTitlePart(rawTitle);
+    const cleanA = cleanArtistPart(rawChannel);
+
+    // Cas 1 : "Artist - Title" dans le titre
+    const dashIdx = cleanT.indexOf(' - ');
+    if (dashIdx > 0) {
+        const left = cleanT.substring(0, dashIdx).trim();
+        const right = cleanT.substring(dashIdx + 3).trim();
+        // a) gauche = artiste, droite = titre
+        candidates.push({ artist: left, title: right });
+        // b) si la gauche correspond au canal -> idem mais aussi sans le prefixe
+        if (cleanA && left.toLowerCase().includes(cleanA.toLowerCase())) {
+            candidates.push({ artist: cleanA, title: right });
+        }
+    }
+
+    // Cas 2 : canal nettoye + titre brut nettoye (avec eventuellement le prefixe enleve)
+    if (cleanA) {
+        let titleNoPrefix = cleanT;
+        if (cleanT.toLowerCase().startsWith(cleanA.toLowerCase() + ' - ')) {
+            titleNoPrefix = cleanT.substring(cleanA.length + 3).trim();
+        }
+        candidates.push({ artist: cleanA, title: titleNoPrefix });
+        if (titleNoPrefix !== cleanT) {
+            candidates.push({ artist: cleanA, title: cleanT });
+        }
+    } else {
+        candidates.push({ artist: '', title: cleanT });
+    }
+
+    // Deduplication
+    const seen = new Set();
+    return candidates.filter(c => {
+        const k = (c.artist + '|' + c.title).toLowerCase();
+        if (!c.title || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
+}
+
+// Pour compat (toujours utilise dans la cle de cache)
+function cleanLyricsQuery(rawTitle, rawChannel) {
+    const cands = buildLyricsCandidates(rawTitle, rawChannel);
+    return cands[0] || { artist: '', title: cleanTitlePart(rawTitle) };
+}
+
+function parseSyncedLyrics(syncedText) {
+    if (!syncedText) return null;
+    const lines = syncedText.split(/\r?\n/);
+    const out = [];
+    const re = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+    for (const line of lines) {
+        const stamps = [];
+        let m;
+        re.lastIndex = 0;
+        while ((m = re.exec(line)) !== null) {
+            const min = parseInt(m[1], 10);
+            const sec = parseFloat(m[2]);
+            stamps.push(min * 60 + sec);
+        }
+        if (!stamps.length) continue;
+        const text = line.replace(/\[\d+:\d+(?:\.\d+)?\]/g, '').trim();
+        for (const ts of stamps) out.push({ ts, text });
+    }
+    out.sort((a, b) => a.ts - b.ts);
+    return out.length ? out : null;
+}
+
+// ===== Versions de paroles (onglets internes) =====
+const LYRICS_VERSIONS_MAX = 5;
+let _lyricsVersions = []; // [{artist, title, plain, synced, source}]
+let _lyricsVersionIdx = -1;
+
+function resetLyricsVersions() {
+    _lyricsVersions = [];
+    _lyricsVersionIdx = -1;
+    renderLyricsVersionsBar();
+}
+
+function addLyricsVersion(artist, title, plain, synced, source) {
+    // Eviter les doublons exacts (meme artist+title)
+    const norm = (s) => (s || '').toLowerCase().trim();
+    const existing = _lyricsVersions.findIndex(v => norm(v.artist) === norm(artist) && norm(v.title) === norm(title));
+    if (existing >= 0) {
+        _lyricsVersionIdx = existing;
+    } else {
+        _lyricsVersions.push({ artist: artist || '', title: title || '', plain: plain || '', synced: synced || '', source: source || '' });
+        if (_lyricsVersions.length > LYRICS_VERSIONS_MAX) _lyricsVersions.shift();
+        _lyricsVersionIdx = _lyricsVersions.length - 1;
+    }
+    renderLyricsVersionsBar();
+}
+
+function renderLyricsVersionsBar() {
+    const bar = document.getElementById('lpVersions');
+    if (!bar) return;
+    if (_lyricsVersions.length <= 1) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    bar.innerHTML = '<span class="lp-versions-label">Versions :</span>'
+        + _lyricsVersions.map((v, i) => {
+            const label = (v.artist ? v.artist + ' · ' : '') + (v.title || '?');
+            const safe = escapeHtml(label.length > 32 ? label.slice(0, 30) + '...' : label);
+            const fullSafe = escapeHtml(label);
+            const isActive = (i === _lyricsVersionIdx) ? ' lpv-active' : '';
+            return '<span class="lpv-tab' + isActive + '" onclick="switchLyricsVersion(' + i + ')" title="' + fullSafe + (v.source ? ' (' + escapeHtml(v.source) + ')' : '') + '">'
+                + safe
+                + '<button class="lpv-close" onclick="event.stopPropagation(); closeLyricsVersion(' + i + ')" title="Retirer cette version">&times;</button>'
+                + '</span>';
+        }).join('');
+}
+
+function switchLyricsVersion(idx) {
+    const v = _lyricsVersions[idx];
+    if (!v) return;
+    _lyricsVersionIdx = idx;
+    setLyricsOffset(0);
+    const t = getCurrentTrackForLyrics();
+    renderLyrics({ plain: v.plain, synced: v.synced }, t ? t.url : '');
+    renderLyricsVersionsBar();
+}
+
+function closeLyricsVersion(idx) {
+    if (!_lyricsVersions[idx]) return;
+    _lyricsVersions.splice(idx, 1);
+    if (_lyricsVersionIdx === idx) {
+        _lyricsVersionIdx = Math.min(idx, _lyricsVersions.length - 1);
+        if (_lyricsVersionIdx >= 0) {
+            switchLyricsVersion(_lyricsVersionIdx);
+            return;
+        }
+    } else if (_lyricsVersionIdx > idx) {
+        _lyricsVersionIdx--;
+    }
+    renderLyricsVersionsBar();
+}
+
+function getLyricsExtraAlways() {
+    return localStorage.getItem('yt_lyrics_extra_always') === '1';
+}
+function setLyricsExtraAlways(on) {
+    if (on) localStorage.setItem('yt_lyrics_extra_always', '1');
+    else localStorage.removeItem('yt_lyrics_extra_always');
+}
+
+async function loadLyricsForCurrent() {
+    const t = getCurrentTrackForLyrics();
+    const body = document.getElementById('lpBody');
+    const titleEl = document.getElementById('lpTitle');
+    const sourceEl = document.getElementById('lpSource');
+    if (!body) return;
+    if (!t || !t.title) {
+        body.innerHTML = '<div class="lp-empty">Aucun titre en cours</div>';
+        if (titleEl) titleEl.textContent = 'Paroles';
+        if (sourceEl) sourceEl.textContent = '';
+        _lyricsState = null;
+        return;
+    }
+    if (titleEl) titleEl.textContent = t.title;
+    if (sourceEl) sourceEl.textContent = t.channel || '';
+    body.innerHTML = renderLyricsSpinner('Recherche des paroles...');
+    setLyricsOffset(0);
+    resetLyricsVersions(); // nouveau morceau -> reset des onglets
+    // Mettre a jour le statut apres ~1.5s pour montrer qu'on cherche dans plusieurs sources
+    const statusTimer = setTimeout(() => {
+        if (body && body.querySelector('.lp-spinner')) {
+            body.innerHTML = renderLyricsSpinner('Premiere source vide, exploration des autres sources...');
+        }
+    }, 1500);
+    // Si le panneau Description est ouvert, recharger
+    if (isDescPanelOpen()) {
+        _descCurrentUrl = null; // force reload
+        loadDescriptionForCurrent();
+    }
+    // Si le karaoke est ouvert, mettre a jour le titre/artiste
+    if (_karaokeOpen) {
+        const kt = document.getElementById('koTitle');
+        const ka = document.getElementById('koArtist');
+        if (kt) kt.textContent = t.title;
+        if (ka) ka.textContent = t.channel || '';
+        const stage = document.getElementById('koStage');
+        if (stage) stage.innerHTML = '<div class="ko-empty">Recherche des paroles...</div>';
+        _karaokeLastIdx = -2;
+    }
+    // Fermer le panneau de correction manuelle si ouvert
+    const ov = document.getElementById('lpManualOverlay');
+    if (ov) ov.style.display = 'none';
+    const fixBtn = document.getElementById('lpFixBtn');
+    if (fixBtn) fixBtn.classList.remove('active');
+
+    // Auto-extra : on tente toujours toutes les sources d'office (lrclib + ovh)
+    const durSuffix = t.duration ? '&durationStr=' + encodeURIComponent(t.duration) : '';
+
+    try {
+        const url = 'api/lyrics?title=' + encodeURIComponent(t.title) + '&channel=' + encodeURIComponent(t.channel || '') + durSuffix + '&extra=1';
+        const data = await apiCall(url);
+        clearTimeout(statusTimer);
+        if (data && data.success && (data.plain || data.synced)) {
+            const m = data.matched || cleanLyricsQuery(t.title, t.channel);
+            addLyricsVersion(m.artist || '', m.title || t.title, data.plain, data.synced, data.source || 'lrclib.net');
+            renderLyrics({ plain: data.plain, synced: data.synced }, t.url);
+        } else {
+            const cleaned = cleanLyricsQuery(t.title, t.channel);
+            const triedTexts = (data && Array.isArray(data.tried))
+                ? data.tried.map(x => x.kind === 'cache' ? 'cache (' + x.key + ')' : (x.kind + ': "' + (x.artist || '') + '" / "' + (x.title || x.q || '') + '"'))
+                : [];
+            renderLyrics({ notFound: true }, t.url, { tried: triedTexts, candidate: cleaned, hasExtra: false, externalLinks: (data && data.externalLinks) || [] });
+        }
+    } catch (e) {
+        clearTimeout(statusTimer);
+        body.innerHTML = '<div class="lp-empty">Impossible de charger les paroles (' + (e.message || 'erreur reseau') + ')</div>';
+    }
+}
+
+// Spinner CSS-only pour la phase de recherche
+function renderLyricsSpinner(text) {
+    return '<div class="lp-loading">'
+        + '<div class="lp-spinner"></div>'
+        + '<div class="lp-loading-text">' + escapeHtml(text || 'Recherche...') + '</div>'
+        + '</div>';
+}
+
+async function searchLyricsExtra(rememberAlways) {
+    if (rememberAlways) setLyricsExtraAlways(true);
+    const t = getCurrentTrackForLyrics();
+    if (!t) return;
+    const body = document.getElementById('lpBody');
+    if (body) body.innerHTML = '<div class="lp-empty">Recherche sur d\'autres sources...</div>';
+    try {
+        const url = 'api/lyrics?title=' + encodeURIComponent(t.title) + '&channel=' + encodeURIComponent(t.channel || '') + '&extra=1';
+        const data = await apiCall(url);
+        if (data && data.success && (data.plain || data.synced)) {
+            const m = data.matched || cleanLyricsQuery(t.title, t.channel);
+            addLyricsVersion(m.artist || '', m.title || t.title, data.plain, data.synced, data.source || 'lrclib.net');
+            renderLyrics({ plain: data.plain, synced: data.synced }, t.url);
+            if (rememberAlways) showToast('Sources secondaires activees pour les prochains titres');
+        } else {
+            const cleaned = cleanLyricsQuery(t.title, t.channel);
+            const triedTexts = (data && Array.isArray(data.tried))
+                ? data.tried.map(x => x.kind === 'cache' ? 'cache (' + x.key + ')' : (x.kind + ': "' + (x.artist || '') + '" / "' + (x.title || x.q || '') + '"'))
+                : [];
+            renderLyrics({ notFound: true }, t.url, { tried: triedTexts, candidate: cleaned, hasExtra: false });
+        }
+    } catch (e) {
+        if (body) body.innerHTML = '<div class="lp-empty">Erreur recherche secondaire: ' + (e.message || 'reseau') + '</div>';
+    }
+}
+
+function toggleManualLyricsSearch() {
+    const ov = document.getElementById('lpManualOverlay');
+    if (!ov) return;
+    if (ov.style.display === 'none') {
+        // Pre-remplir avec le titre/artiste actuel devine
+        const t = getCurrentTrackForLyrics();
+        if (t) {
+            const cleaned = cleanLyricsQuery(t.title, t.channel);
+            const ai = document.getElementById('lpFixArtist');
+            const ti = document.getElementById('lpFixTitle');
+            if (ai) ai.value = cleaned.artist || '';
+            if (ti) ti.value = cleaned.title || t.title || '';
+        }
+        ov.style.display = 'block';
+        const btn = document.getElementById('lpFixBtn');
+        if (btn) btn.classList.add('active');
+    } else {
+        ov.style.display = 'none';
+        const btn = document.getElementById('lpFixBtn');
+        if (btn) btn.classList.remove('active');
+    }
+}
+
+async function manualLyricsSearchFromFix(useExtra) {
+    const ai = document.getElementById('lpFixArtist');
+    const ti = document.getElementById('lpFixTitle');
+    if (!ai || !ti) return;
+    const artist = ai.value.trim();
+    const title = ti.value.trim();
+    if (!title) { ti.focus(); return; }
+    const body = document.getElementById('lpBody');
+    if (body) body.innerHTML = renderLyricsSpinner('Recherche : "' + artist + ' - ' + title + '"...');
+    setLyricsOffset(0);
+    try {
+        let url = 'api/lyrics?title=' + encodeURIComponent(title) + '&artist=' + encodeURIComponent(artist) + '&titleExact=' + encodeURIComponent(title) + '&extra=1';
+        const data = await apiCall(url);
+        const t = getCurrentTrackForLyrics();
+        if (data && data.success && (data.plain || data.synced)) {
+            addLyricsVersion(artist, title, data.plain, data.synced, data.source || 'lrclib.net');
+            renderLyrics({ plain: data.plain, synced: data.synced }, t ? t.url : '');
+            // Fermer le panneau de correction apres succes
+            const ov = document.getElementById('lpManualOverlay');
+            if (ov) ov.style.display = 'none';
+            const btn = document.getElementById('lpFixBtn');
+            if (btn) btn.classList.remove('active');
+            showToast('Paroles mises a jour');
+        } else {
+            const triedTexts = (data && Array.isArray(data.tried))
+                ? data.tried.map(x => x.kind === 'cache' ? 'cache (' + x.key + ')' : (x.kind + ': "' + (x.artist || '') + '" / "' + (x.title || x.q || '') + '"'))
+                : ['manual: "' + artist + '" / "' + title + '"'];
+            renderLyrics({ notFound: true }, '', { tried: triedTexts, candidate: { artist, title }, hasExtra: !useExtra, externalLinks: (data && data.externalLinks) || [] });
+        }
+    } catch (e) {
+        if (body) body.innerHTML = '<div class="lp-empty">Erreur: ' + (e.message || 'reseau') + '</div>';
+    }
+}
+
+async function manualLyricsSearch() {
+    const ai = document.getElementById('lpManualArtist');
+    const ti = document.getElementById('lpManualTitle');
+    if (!ai || !ti) return;
+    const artist = ai.value.trim();
+    const title = ti.value.trim();
+    if (!title) { ti.focus(); return; }
+    const body = document.getElementById('lpBody');
+    if (body) body.innerHTML = renderLyricsSpinner('Recherche manuelle...');
+    try {
+        const url = 'api/lyrics?title=' + encodeURIComponent(title) + '&artist=' + encodeURIComponent(artist) + '&titleExact=' + encodeURIComponent(title) + '&extra=1';
+        const data = await apiCall(url);
+        const t = getCurrentTrackForLyrics();
+        if (data && data.success && (data.plain || data.synced)) {
+            addLyricsVersion(artist, title, data.plain, data.synced, data.source || 'lrclib.net');
+            renderLyrics({ plain: data.plain, synced: data.synced }, t ? t.url : '');
+        } else {
+            const triedTexts = (data && Array.isArray(data.tried))
+                ? data.tried.map(x => x.kind === 'cache' ? 'cache (' + x.key + ')' : (x.kind + ': "' + (x.artist || '') + '" / "' + (x.title || x.q || '') + '"'))
+                : ['manual: "' + artist + '" / "' + title + '"'];
+            renderLyrics({ notFound: true }, '', { tried: triedTexts, candidate: { artist, title }, externalLinks: (data && data.externalLinks) || [] });
+        }
+    } catch (e) {
+        if (body) body.innerHTML = '<div class="lp-empty">Erreur: ' + (e.message || 'reseau') + '</div>';
+    }
+}
+
+function renderLyrics(entry, urlForState, debug) {
+    const body = document.getElementById('lpBody');
+    if (!body) return;
+    if (entry.notFound || (!entry.plain && !entry.synced)) {
+        const cand = (debug && debug.candidate) ? debug.candidate : { artist: '', title: '' };
+        const triedHtml = (debug && debug.tried && debug.tried.length)
+            ? '<details style="margin-top:8px;font-size:11px;color:var(--text-muted);"><summary style="cursor:pointer;">Voir les recherches tentees (' + debug.tried.length + ')</summary><ul style="margin:6px 0 0;padding-left:18px;">' + debug.tried.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul></details>'
+            : '';
+        // Plus de prompt extra : la recherche secondaire est faite automatiquement
+        const extraBlock = '';
+        const links = (debug && Array.isArray(debug.externalLinks) && debug.externalLinks.length)
+            ? debug.externalLinks
+            : [];
+        const linksBlock = links.length
+            ? '<div class="lp-extlinks">'
+                + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">&#128279; Ouvre la recherche sur un autre site :</div>'
+                + '<div style="display:flex;flex-wrap:wrap;gap:6px;">'
+                + links.map(l => '<a href="' + Dom.attr(l.url) + '" target="_blank" rel="noopener" class="lp-extlink">' + escapeHtml(l.name) + '</a>').join('')
+                + '</div></div>'
+            : '';
+        body.innerHTML = '<div class="lp-empty" style="text-align:center;">'
+            + '<div style="font-size:24px;opacity:0.5;margin-bottom:6px;">&#128220;</div>'
+            + 'Pas de paroles trouvees sur lrclib.net.'
+            + '<div style="font-size:11px;margin-top:6px;">Verifie ou corrige l\'artiste et le titre :</div>'
+            + '</div>'
+            + '<div class="lp-manual">'
+            + '<input type="text" id="lpManualArtist" placeholder="Artiste" value="' + escapeHtml(cand.artist || '') + '">'
+            + '<input type="text" id="lpManualTitle" placeholder="Titre" value="' + escapeHtml(cand.title || '') + '">'
+            + '<button onclick="manualLyricsSearch()">Chercher</button>'
+            + '</div>'
+            + extraBlock
+            + linksBlock
+            + triedHtml;
+        _lyricsState = null;
+        return;
+    }
+    const synced = parseSyncedLyrics(entry.synced);
+    if (synced && synced.length) {
+        body.innerHTML = synced.map((l, i) => '<div class="lp-line" data-idx="' + i + '" onclick="onLyricsLineClick(' + i + ')" title="Click selon le mode (seeker / synchro)">' + escapeHtml(l.text || ' ') + '</div>').join('');
+        _lyricsState = { url: urlForState, synced, current: -1, synthetic: false };
+    } else if (entry.plain) {
+        // Synthese de timing approximatif : on repartit les lignes uniformement sur la duree du morceau
+        const lines = entry.plain.split(/\r?\n/);
+        const a = getActiveAudio();
+        const dur = (a && a.duration && isFinite(a.duration)) ? a.duration : 200;
+        // Reserver 5% au debut et 5% a la fin (souvent intro/outro instrumentaux)
+        const startOff = Math.min(15, dur * 0.05);
+        const usable = Math.max(30, dur - startOff - dur * 0.05);
+        const nonEmpty = lines.filter(l => l.trim().length > 0).length || 1;
+        let nonEmptyIdx = 0;
+        const synthSynced = lines.map((text, i) => {
+            const trimmed = (text || '').trim();
+            if (!trimmed) {
+                return { ts: startOff + (nonEmptyIdx / nonEmpty) * usable, text: '' };
+            }
+            const ts = startOff + (nonEmptyIdx / nonEmpty) * usable;
+            nonEmptyIdx++;
+            return { ts, text: trimmed };
+        });
+        body.innerHTML = '<div class="lp-synth-notice">&#9201; Synchro approximative (paroles non timecodees)</div>'
+            + synthSynced.map((l, i) => '<div class="lp-line" data-idx="' + i + '" onclick="onLyricsLineClick(' + i + ')" title="Click selon le mode (seeker / synchro)">' + escapeHtml(l.text || ' ') + '</div>').join('');
+        _lyricsState = { url: urlForState, synced: synthSynced, current: -1, synthetic: true };
+    } else {
+        const plain = (entry.plain || '').split(/\r?\n/).map(s => '<div class="lp-line lp-line-plain">' + escapeHtml(s) + '</div>').join('');
+        body.innerHTML = plain || '<div class="lp-empty">Pas de paroles.</div>';
+        _lyricsState = { url: urlForState, synced: null, current: -1 };
+    }
+}
+
+function getLyricsAutoFollow() {
+    // Defaut : ON (true). On stocke '0' uniquement si l'utilisateur a desactive.
+    return localStorage.getItem('yt_lyrics_auto_follow') !== '0';
+}
+
+function setLyricsAutoFollow(on) {
+    localStorage.setItem('yt_lyrics_auto_follow', on ? '1' : '0');
+    const cb = document.getElementById('lpFollowToggle');
+    if (cb && cb.checked !== !!on) cb.checked = !!on;
+    if (on) lyricsScrollToCurrent();
+}
+
+// === Decalage manuel des paroles (offset) ===
+let _lyricsOffset = 0; // secondes, ajoute aux timestamps de chaque ligne
+
+function setLyricsOffset(sec) {
+    _lyricsOffset = sec || 0;
+    const badge = document.getElementById('lpOffsetBadge');
+    if (badge) {
+        if (Math.abs(_lyricsOffset) < 0.05) {
+            badge.style.display = 'none';
+        } else {
+            const sign = _lyricsOffset > 0 ? '+' : '';
+            badge.textContent = sign + _lyricsOffset.toFixed(1) + 's  &times;';
+            badge.style.display = 'inline-flex';
+            badge.innerHTML = sign + _lyricsOffset.toFixed(1) + 's <span class="lp-offset-x">&times;</span>';
+        }
+    }
+    // Force un refresh immediat de la ligne courante
+    if (_lyricsState) _lyricsState.current = -1;
+}
+
+function resetLyricsOffset() {
+    setLyricsOffset(0);
+}
+
+// === Mode de clic sur une ligne ===
+function getLyricsClickMode() {
+    const v = localStorage.getItem('yt_lyrics_click_mode');
+    return (v === 'sync' || v === 'none') ? v : 'seek';
+}
+
+function setLyricsClickMode(mode) {
+    if (mode !== 'seek' && mode !== 'sync' && mode !== 'none') mode = 'seek';
+    localStorage.setItem('yt_lyrics_click_mode', mode);
+    const sel = document.getElementById('lpClickMode');
+    if (sel && sel.value !== mode) sel.value = mode;
+}
+
+function onLyricsLineClick(idx) {
+    if (!_lyricsState || !_lyricsState.synced) return;
+    const line = _lyricsState.synced[idx];
+    if (!line) return;
+    const mode = getLyricsClickMode();
+    const a = getActiveAudio();
+    if (mode === 'seek') {
+        if (a && a.duration) {
+            // On retire l'offset eventuel pour seeker au "vrai" timestamp de la ligne
+            a.currentTime = Math.max(0, Math.min(a.duration, line.ts - _lyricsOffset));
+            // Et on synchronise aussi mainAudio en cas de crossfade
+        }
+    } else if (mode === 'sync') {
+        if (a && a.duration) {
+            // L'offset est ajuste pour que la ligne cliquee corresponde a "maintenant"
+            const newOffset = a.currentTime - line.ts;
+            setLyricsOffset(newOffset);
+        }
+    }
+    // mode 'none' : rien
+}
+
+function lyricsScrollToCurrent() {
+    if (!_lyricsState || !_lyricsState.synced) return;
+    const idx = _lyricsState.current;
+    if (idx < 0) return;
+    const body = document.getElementById('lpBody');
+    if (!body) return;
+    const lineEl = body.querySelector('.lp-line[data-idx="' + idx + '"]');
+    if (!lineEl) return;
+    const offset = lineEl.offsetTop - body.clientHeight / 2 + lineEl.clientHeight / 2;
+    body.scrollTo({ top: offset, behavior: 'smooth' });
+}
+
+// ===== Mode karaoke (plein ecran) =====
+let _karaokeOpen = false;
+let _karaokeLastIdx = -2;
+
+const KARAOKE_DEFAULTS = {
+    effect: 'glow',
+    color: 'pink',
+    context: 2,
+    size: 'md',
+    font: 'sans',
+    bg: 'dark',
+    uppercase: false
+};
+
+function getKaraokeSettings() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('yt_karaoke_settings') || '{}');
+        return Object.assign({}, KARAOKE_DEFAULTS, saved);
+    } catch (e) { return Object.assign({}, KARAOKE_DEFAULTS); }
+}
+
+function saveKaraokeSettings(s) {
+    try { localStorage.setItem('yt_karaoke_settings', JSON.stringify(s)); } catch (e) {}
+}
+
+function updateKaraokeSetting(key, value) {
+    const s = getKaraokeSettings();
+    s[key] = value;
+    saveKaraokeSettings(s);
+    applyKaraokeSettings();
+    if (key === 'context') { _karaokeLastIdx = -2; karaokeRender(); }
+}
+
+function resetKaraokeSettings() {
+    saveKaraokeSettings({});
+    syncKaraokeSettingsUI();
+    applyKaraokeSettings();
+    _karaokeLastIdx = -2;
+    karaokeRender();
+}
+
+function syncKaraokeSettingsUI() {
+    const s = getKaraokeSettings();
+    const el = (id) => document.getElementById(id);
+    if (el('koSetEffect')) el('koSetEffect').value = s.effect;
+    if (el('koSetColor')) el('koSetColor').value = s.color;
+    if (el('koSetContext')) el('koSetContext').value = String(s.context);
+    if (el('koSetSize')) el('koSetSize').value = s.size;
+    if (el('koSetFont')) el('koSetFont').value = s.font;
+    if (el('koSetBg')) el('koSetBg').value = s.bg;
+    if (el('koSetUppercase')) el('koSetUppercase').checked = !!s.uppercase;
+}
+
+function applyKaraokeSettings() {
+    const ov = document.getElementById('karaokeOverlay');
+    if (!ov) return;
+    const s = getKaraokeSettings();
+    // Reset toutes les classes ko-eff-/ko-col-/ko-sz-/ko-fn-/ko-bg-/ko-uc
+    ov.className = ov.className.split(' ').filter(c => !/^ko-(eff|col|sz|fn|bg|uc)-/.test(c)).join(' ');
+    if (!ov.classList.contains('karaoke-overlay')) ov.classList.add('karaoke-overlay');
+    ov.classList.add('ko-eff-' + s.effect);
+    ov.classList.add('ko-col-' + s.color);
+    ov.classList.add('ko-sz-' + s.size);
+    ov.classList.add('ko-fn-' + s.font);
+    ov.classList.add('ko-bg-' + s.bg);
+    if (s.uppercase) ov.classList.add('ko-uc-on');
+}
+
+function toggleKaraokeSettings() {
+    const p = document.getElementById('koSettingsPanel');
+    if (!p) return;
+    if (p.style.display === 'none') {
+        syncKaraokeSettingsUI();
+        p.style.display = 'block';
+    } else {
+        p.style.display = 'none';
+    }
+}
+
+function enterKaraokeMode() {
+    const ov = document.getElementById('karaokeOverlay');
+    if (!ov) return;
+    if (!_lyricsState || !_lyricsState.synced || !_lyricsState.synced.length) {
+        showToast('Pas de paroles disponibles pour ce titre');
+        return;
+    }
+    const t = getCurrentTrackForLyrics();
+    document.getElementById('koTitle').textContent = (t && t.title) || '';
+    const artistEl = document.getElementById('koArtist');
+    artistEl.textContent = (t && t.channel) || '';
+    if (_lyricsState.synthetic) {
+        artistEl.textContent += '  ·  Synchro approximative';
+    }
+    ov.style.display = 'flex';
+    _karaokeOpen = true;
+    _karaokeLastIdx = -2;
+    applyKaraokeSettings();
+    karaokeRender();
+}
+
+function exitKaraokeMode() {
+    const ov = document.getElementById('karaokeOverlay');
+    if (!ov) return;
+    ov.style.display = 'none';
+    _karaokeOpen = false;
+}
+
+function karaokeRender() {
+    if (!_karaokeOpen || !_lyricsState || !_lyricsState.synced) return;
+    const stage = document.getElementById('koStage');
+    if (!stage) return;
+    const arr = _lyricsState.synced;
+    const cur = _lyricsState.current;
+
+    // Construire toutes les lignes UNE SEULE FOIS (signature pour detecter changement de track)
+    const sig = (arr.length || 0) + ':' + (arr[0] && arr[0].text ? arr[0].text.slice(0, 20) : '');
+    if (stage.dataset.sig !== sig) {
+        stage.dataset.sig = sig;
+        stage.innerHTML = arr.map((l, i) =>
+            '<div class="ko-line" data-idx="' + i + '" onclick="onLyricsLineClick(' + i + ')">' +
+            escapeHtml(l.text || ' ') +
+            '</div>'
+        ).join('');
+        _karaokeLastIdx = -2;
+    }
+    if (cur === _karaokeLastIdx) return;
+    _karaokeLastIdx = cur;
+
+    const ctxN = getKaraokeSettings().context;
+    // Mettre a jour les classes selon la distance a la ligne courante
+    const lines = stage.querySelectorAll('.ko-line');
+    lines.forEach((el, i) => {
+        const off = i - cur;
+        const absOff = Math.abs(off);
+        // Reset
+        el.classList.remove('ko-line-current', 'ko-line-context', 'ko-line-off1', 'ko-line-off2', 'ko-line-off3', 'ko-line-far');
+        if (off === 0) {
+            el.classList.add('ko-line-current');
+        } else if (absOff <= ctxN) {
+            el.classList.add('ko-line-context', 'ko-line-off' + absOff);
+        } else {
+            el.classList.add('ko-line-far');
+        }
+    });
+
+    // Translater le stage pour centrer la ligne courante
+    if (cur >= 0) {
+        const lineEl = stage.querySelector('.ko-line[data-idx="' + cur + '"]');
+        if (lineEl) {
+            const containerH = stage.parentElement ? stage.parentElement.clientHeight : window.innerHeight;
+            // Centre du conteneur - centre de la ligne dans le stage
+            const lineCenter = lineEl.offsetTop + lineEl.offsetHeight / 2;
+            const targetY = (containerH / 2) - lineCenter;
+            stage.style.transform = 'translateY(' + targetY + 'px)';
+        }
+    }
+}
+
+// Echap pour quitter
+document.addEventListener('keydown', function(e) {
+    if (_karaokeOpen && (e.key === 'Escape' || e.key === 'Esc')) {
+        e.preventDefault();
+        exitKaraokeMode();
+    }
+});
+
+function lyricsTick() {
+    if (!_lyricsState || !_lyricsState.synced) return;
+    if (!isLyricsPanelOpen() && !_karaokeOpen) return;
+    const a = getActiveAudio();
+    if (!a || a.paused) return;
+    // On compare au timestamp + offset utilisateur (decalage manuel)
+    const t = a.currentTime - _lyricsOffset;
+    const arr = _lyricsState.synced;
+    let idx = -1;
+    for (let i = 0; i < arr.length; i++) {
+        if (arr[i].ts <= t + 0.05) idx = i; else break;
+    }
+    if (idx === _lyricsState.current) return;
+    _lyricsState.current = idx;
+    const body = document.getElementById('lpBody');
+    if (!body) return;
+    body.querySelectorAll('.lp-line.lp-line-active').forEach(el => el.classList.remove('lp-line-active'));
+    if (idx >= 0) {
+        const lineEl = body.querySelector('.lp-line[data-idx="' + idx + '"]');
+        if (lineEl) {
+            lineEl.classList.add('lp-line-active');
+            // Scroll seulement si suivi auto active
+            if (getLyricsAutoFollow()) {
+                const offsetPx = lineEl.offsetTop - body.clientHeight / 2 + lineEl.clientHeight / 2;
+                body.scrollTo({ top: offsetPx, behavior: 'smooth' });
+            }
+        }
+    }
+    if (_karaokeOpen) karaokeRender();
+}
+setInterval(lyricsTick, 250);
+
+// Auto-ouverture quand un nouveau titre demarre, si l'utilisateur l'a active
+function maybeAutoOpenLyrics() {
+    if (localStorage.getItem('yt_lyrics_auto') === '1' && !isLyricsPanelOpen()) {
+        toggleLyricsPanel();
+    } else if (isLyricsPanelOpen()) {
+        loadLyricsForCurrent();
+    }
+}
+
+function setFlowNotifEnabled(on) {
+    if (on) {
+        if ('Notification' in window) {
+            if (Notification.permission === 'granted') {
+                localStorage.setItem('yt_flow_notif_on', '1');
+            } else if (Notification.permission === 'default') {
+                Notification.requestPermission().then(p => {
+                    if (p === 'granted') {
+                        localStorage.setItem('yt_flow_notif_on', '1');
+                    } else {
+                        localStorage.removeItem('yt_flow_notif_on');
+                        const cb = document.getElementById('prefFlowNotif');
+                        if (cb) cb.checked = false;
+                    }
+                });
+            } else {
+                showToast('Les notifications ont ete bloquees par le navigateur. Active-les dans les parametres du site.');
+                const cb = document.getElementById('prefFlowNotif');
+                if (cb) cb.checked = false;
+            }
+        }
+    } else {
+        localStorage.removeItem('yt_flow_notif_on');
+    }
+}
 function toggleNotifications() {
     const off = localStorage.getItem('yt_notif_off') === '1';
     if (off) {
@@ -80,7 +1354,7 @@ function switchTab(tab) {
     document.querySelector('.tab-content#tab-' + tab).classList.add('active');
     // Trouver le bon onglet a activer dans la barre
     document.querySelectorAll('.tab').forEach(t => {
-        const tabMap = { 'Telecharger': 'download', 'Recherche': 'search', 'Bibliotheque': 'library', 'Mon Flow': 'flow', 'Stats': 'stats', 'Profil': 'profile' };
+        const tabMap = { 'Telecharger': 'download', 'Recherche': 'search', 'Bibliotheque': 'library', 'Mon Flow': 'flow', 'Stats': 'stats', 'Profil': 'profile', 'Aide': 'help' };
         if (tabMap[t.textContent] === tab) t.classList.add('active');
     });
     localStorage.setItem('yt_tab', tab);
@@ -91,6 +1365,9 @@ function switchTab(tab) {
         setStatsSubtab(sub);
     }
     if (tab === 'library') { loadLibrary(); loadHistory(); loadSystemInfo(); }
+    if (tab === 'search') {
+        if (typeof renderInitialSearchHistory === 'function') renderInitialSearchHistory();
+    }
 }
 
 // ========== FORMATS ==========
@@ -161,6 +1438,58 @@ function cancelDownload() {
     document.getElementById('result').innerHTML = '<div class="message error">Telechargement annule.</div>';
     document.getElementById('btn').disabled = false;
     document.getElementById('btn').textContent = 'Telecharger';
+    showDismissFeedbackBtn();
+}
+
+function showDismissFeedbackBtn() {
+    const b = document.getElementById('btnDismissFeedback');
+    if (b) b.style.display = '';
+}
+
+(function setupMessageDismiss() {
+    const result = document.getElementById('result');
+    if (!result) return;
+    function decorate(msg) {
+        if (!msg || msg.dataset.dismissable === '1') return;
+        msg.dataset.dismissable = '1';
+        msg.classList.add('message-dismissable');
+        const close = document.createElement('button');
+        close.className = 'msg-close';
+        close.type = 'button';
+        close.title = 'Effacer ce message';
+        close.innerHTML = '&times;';
+        close.addEventListener('click', function(e) {
+            e.stopPropagation();
+            msg.remove();
+        });
+        msg.appendChild(close);
+    }
+    function scan(root) {
+        if (!root || root.nodeType !== 1) return;
+        if (root.classList && root.classList.contains('message')) decorate(root);
+        if (root.querySelectorAll) root.querySelectorAll('.message').forEach(decorate);
+    }
+    new MutationObserver(muts => {
+        muts.forEach(m => m.addedNodes.forEach(scan));
+    }).observe(result, { childList: true, subtree: true });
+    scan(result);
+})();
+
+function dismissDownloadFeedback() {
+    const result = document.getElementById('result');
+    if (result) result.innerHTML = '';
+    const progressZone = document.getElementById('progressZone');
+    if (progressZone) progressZone.classList.remove('active');
+    const progressBar = document.getElementById('progressBar');
+    if (progressBar) progressBar.style.width = '0%';
+    const progressText = document.getElementById('progressText');
+    if (progressText) progressText.textContent = 'Demarrage...';
+    const btnCancel = document.getElementById('btnCancel');
+    if (btnCancel) btnCancel.style.display = 'none';
+    const btnDismiss = document.getElementById('btnDismissFeedback');
+    if (btnDismiss) btnDismiss.style.display = 'none';
+    const videoCard = document.getElementById('videoCard');
+    if (videoCard) videoCard.classList.remove('active');
 }
 
 document.getElementById('dlForm').addEventListener('submit', async function(e) {
@@ -187,6 +1516,7 @@ document.getElementById('dlForm').addEventListener('submit', async function(e) {
     progressZone.classList.remove('active');
     result.innerHTML = '';
     progressBar.style.width = '0%';
+    document.getElementById('btnDismissFeedback').style.display = 'none';
     currentDlCancelled = false;
     if (currentDlInterval) { clearInterval(currentDlInterval); currentDlInterval = null; }
 
@@ -202,12 +1532,7 @@ document.getElementById('dlForm').addEventListener('submit', async function(e) {
 
     try {
         logTech('INFO', 'Recuperation infos', { url, type, format, quality });
-        const infoResp = await fetch('api/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'url=' + encodeURIComponent(url)
-        });
-        const info = await infoResp.json();
+        const info = await apiPost('api/info', { url });
         logTech(info.success ? 'INFO' : 'ERROR', 'Reponse /api/info', info.success ? { title: info.title } : { error: info.error });
 
         if (!info.success) {
@@ -244,13 +1569,7 @@ document.getElementById('dlForm').addEventListener('submit', async function(e) {
         }
 
         try {
-            const dlResp = await fetch('api/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'url=' + encodeURIComponent(url) + '&type=' + type + '&format=' + format
-                    + '&quality=' + quality + '&cover=' + saveCover
-            });
-            const dlData = await dlResp.json();
+            const dlData = await apiPost('api/download', { url, type, format, quality, cover: saveCover });
             logTech(dlData.success ? 'INFO' : 'ERROR', 'Reponse /api/download', dlData);
 
             if (!dlData.success) {
@@ -282,8 +1601,7 @@ document.getElementById('dlForm').addEventListener('submit', async function(e) {
         currentDlInterval = setInterval(async () => {
             if (currentDlCancelled) { clearInterval(currentDlInterval); currentDlInterval = null; return; }
             try {
-                const resp = await fetch('api/progress?id=' + jobId);
-                const data = await resp.json();
+                const data = await apiCall('api/progress?id=' + jobId);
 
                 if (data.status === 'done') {
                     logTech('INFO', 'Telechargement termine', { jobId, file: data.file });
@@ -301,31 +1619,19 @@ document.getElementById('dlForm').addEventListener('submit', async function(e) {
                     html += '</div>';
                     result.innerHTML = html;
 
-                    // Ajouter a la bibliotheque
-                    await fetch('api/library', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: 'action=add_item&file=' + encodeURIComponent(data.file)
-                            + '&title=' + encodeURIComponent(info.title)
-                            + '&type=' + type + '&format=' + format
-                            + '&folder=' + encodeURIComponent(folder)
-                            + '&thumbnail=' + encodeURIComponent(info.thumbnail)
-                            + '&channel=' + encodeURIComponent(info.channel)
-                            + '&duration=' + encodeURIComponent(info.duration)
-                            + '&cover=' + encodeURIComponent(data.cover || '')
-                            + '&url=' + encodeURIComponent(url)
+                    await apiPost('api/library', {
+                        action: 'add_item', file: data.file, title: info.title,
+                        type, format, folder, thumbnail: info.thumbnail,
+                        channel: info.channel, duration: info.duration,
+                        cover: data.cover || '', url
                     });
 
                     notifyDone(info.title);
                     addHistory(info.title, 'success', format, type, url, info);
                     incrementDownloadCount();
                     loadSystemInfo();
-                    // Fix cover si manquant
                     if (!data.cover) {
-                        fetch('api/library', { method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: 'action=fix_covers'
-                        }).catch(() => {});
+                        apiPost('api/library', { action: 'fix_covers' }).catch(() => {});
                     }
                     reset();
                 } else if (data.status === 'error') {
@@ -367,13 +1673,12 @@ document.getElementById('dlForm').addEventListener('submit', async function(e) {
         }, 500);
     }
 
-    function reset() { btn.disabled = false; btn.textContent = 'Telecharger'; document.getElementById('btnCancel').style.display = 'none'; currentDlInterval = null; }
+    function reset() { btn.disabled = false; btn.textContent = 'Telecharger'; document.getElementById('btnCancel').style.display = 'none'; currentDlInterval = null; showDismissFeedbackBtn(); }
 });
 
 // ========== LIBRARY ==========
 async function loadLibrary() {
-    const resp = await fetch('api/library?action=list');
-    libraryData = await resp.json();
+    libraryData = await apiCall('api/library?action=list');
     renderLibrary();
     updateFolderSelect();
     buildFilterChips();
@@ -541,12 +1846,8 @@ function renderLibrary() {
 async function libToggleLike(itemId, btn) {
     console.log('[LIKE LIB] click id=', itemId);
     try {
-        const resp = await fetch('api/library', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=toggle_like&item_id=' + encodeURIComponent(itemId)
-        });
-        const data = await resp.json();
-        console.log('[LIKE LIB] response', resp.status, data);
+        const data = await apiPost('api/library', { action: 'toggle_like', item_id: itemId });
+        console.log('[LIKE LIB] response', data);
         if (!data.success) { alert('Like refuse par le serveur : ' + (data.error || 'inconnu')); return; }
         const item = libraryData.items.find(i => i.id === itemId);
         if (item) item.liked = data.liked;
@@ -623,22 +1924,14 @@ function showCreateFolder() {
 async function createFolder() {
     const name = document.getElementById('folderName').value.trim();
     if (!name) return;
-    await fetch('api/library', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=create_folder&name=' + encodeURIComponent(name)
-    });
+    await apiPost('api/library', { action: 'create_folder', name });
     closeModal('modalFolder');
     loadLibrary();
 }
 
 function deleteFolder(id) {
     showConfirm('Supprimer le dossier', 'Les elements du dossier retourneront a la racine.', 'Supprimer', 'var(--error)', async () => {
-        await fetch('api/library', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=delete_folder&folder_id=' + id
-        });
+        await apiPost('api/library', { action: 'delete_folder', folder_id: id });
         if (currentFolder === id) currentFolder = '';
         loadLibrary();
         loadSystemInfo();
@@ -656,35 +1949,25 @@ async function convertToAudio(id) {
     }
 
     try {
-        const resp = await fetch('api/convert', {
+        const data = await apiCall('api/convert', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file: item.file, format: format.toLowerCase(), quality: '0' })
         });
-        const data = await resp.json();
         if (!data.success) { alert('Erreur : ' + data.error); return; }
 
-        // Attendre la conversion (poll toutes les 2s)
         const outputFile = data.outputFile;
         const pollConvert = setInterval(async () => {
             try {
-                const check = await fetch('api/convert?file=' + encodeURIComponent(outputFile));
-                const status = await check.json();
+                const status = await apiCall('api/convert?file=' + encodeURIComponent(outputFile));
                 if (status.done) {
                     clearInterval(pollConvert);
-                    // Ajouter a la bibliotheque
-                    await fetch('api/library', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: 'action=add_item&file=' + encodeURIComponent(outputFile)
-                            + '&title=' + encodeURIComponent(item.title)
-                            + '&type=audio&format=' + format.toLowerCase()
-                            + '&folder=' + encodeURIComponent(item.folder || '')
-                            + '&thumbnail=' + encodeURIComponent(item.thumbnail || '')
-                            + '&channel=' + encodeURIComponent(item.channel || '')
-                            + '&duration=' + encodeURIComponent(item.duration || '')
-                            + '&cover=' + encodeURIComponent(item.cover || '')
-                            + '&url=' + encodeURIComponent(item.url || '')
+                    await apiPost('api/library', {
+                        action: 'add_item', file: outputFile, title: item.title,
+                        type: 'audio', format: format.toLowerCase(),
+                        folder: item.folder || '', thumbnail: item.thumbnail || '',
+                        channel: item.channel || '', duration: item.duration || '',
+                        cover: item.cover || '', url: item.url || ''
                     });
                     loadLibrary();
                 }
@@ -699,11 +1982,7 @@ function deleteItem(id) {
     const item = libraryData.items.find(i => i.id === id);
     const title = item ? item.title : 'cet element';
     showConfirm('Supprimer', 'Supprimer "' + title + '" ? Le fichier sera supprime du disque.', 'Supprimer', 'var(--error)', async () => {
-        await fetch('api/library', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=delete_item&item_id=' + id
-        });
+        await apiPost('api/library', { action: 'delete_item', item_id: id });
         loadLibrary();
         loadSystemInfo();
     });
@@ -719,11 +1998,7 @@ function showMoveItem(itemId) {
 
 async function confirmMove() {
     const folderId = document.getElementById('moveTarget').value;
-    await fetch('api/library', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=move_item&item_id=' + moveItemId + '&folder_id=' + encodeURIComponent(folderId)
-    });
+    await apiPost('api/library', { action: 'move_item', item_id: moveItemId, folder_id: folderId });
     closeModal('modalMove');
     loadLibrary();
 }
@@ -752,11 +2027,7 @@ function deleteSelected() {
     if (ids.length === 0) { showToast('Selectionne au moins un element.'); return; }
     showConfirm('Supprimer la selection', ids.length + ' element(s) seront supprimes du disque.', 'Supprimer tout', 'var(--error)', async () => {
         for (const id of ids) {
-            await fetch('api/library', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'action=delete_item&item_id=' + id
-            });
+            await apiPost('api/library', { action: 'delete_item', item_id: id });
         }
         loadLibrary();
         loadSystemInfo();
@@ -772,9 +2043,539 @@ document.getElementById('folderName').addEventListener('keydown', function(e) {
 let playlist = [];
 let playIndex = 0;
 let playMode = 'normal'; // normal, loop, loopOne, shuffle
-let playbackContext = 'library'; // 'library', 'flow', 'history'
+let playbackContext = 'library'; // 'library', 'flow', 'history', 'search'
+
+function setPlayerSource(ctx) {
+    playbackContext = ctx || 'library';
+    const el = document.getElementById('playerSource');
+    const txt = document.getElementById('playerSourceText');
+    if (el && txt) {
+        const messages = {
+            flow: { cls: 'src-flow', text: '♫ Lecture depuis Mon Flow — streaming sans telecharger · ajout aux compteurs Mon Flow' },
+            library: { cls: 'src-library', text: '♫ Lecture depuis ta Bibliotheque — fichier local sur ton disque' },
+            history: { cls: 'src-history', text: '♫ Lecture depuis l\'Historique — streaming si non telecharge' },
+            search: { cls: 'src-search', text: '♫ Lecture depuis la Recherche — ecoute ephemere (apparait dans Stats > Ephemeres si non sauve)' }
+        };
+        const m = messages[ctx] || messages.library;
+        el.className = 'p-source ' + m.cls;
+        txt.textContent = m.text;
+        el.style.display = 'inline-block';
+    }
+    setTimeout(playerSyncLikeBtn, 50);
+    setTimeout(updatePlayerBackground, 100);
+}
+
+function updatePlayerBackground() {
+    const bar = document.getElementById('playerBar');
+    const thumb = document.getElementById('playerThumb');
+    if (!bar || !thumb) return;
+    const src = thumb.src && !thumb.src.endsWith('/') ? thumb.src : '';
+    if (src && src !== 'about:blank') {
+        bar.style.setProperty('--player-bg-image', `url("${src}")`);
+    } else {
+        bar.style.removeProperty('--player-bg-image');
+    }
+}
+
+(function watchPlayerThumb() {
+    const t = document.getElementById('playerThumb');
+    if (!t) { setTimeout(watchPlayerThumb, 200); return; }
+    new MutationObserver(updatePlayerBackground).observe(t, { attributes: true, attributeFilter: ['src'] });
+    updatePlayerBackground();
+})();
+
+// ===== Audio spectrum visualizer =====
+let _vizCtx = null, _vizAnalyser = null, _vizSource = null, _vizSourceB = null, _vizRaf = null, _vizFakeMode = false;
+
+function initVisualizer() {
+    const canvas = document.getElementById('playerVisualizer');
+    if (!canvas || !audioEl) return;
+    canvas.onclick = () => canvas.classList.toggle('hidden');
+
+    if (_vizSource) return;
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) { _vizFakeMode = true; startVisualizerLoop(); return; }
+        _vizCtx = new Ctx();
+        _vizSource = _vizCtx.createMediaElementSource(audioEl);
+        _vizSourceB = _vizCtx.createMediaElementSource(audioElB);
+        _vizAnalyser = _vizCtx.createAnalyser();
+        _vizAnalyser.fftSize = 64;
+        _vizSource.connect(_vizAnalyser);
+        _vizSourceB.connect(_vizAnalyser);
+        _vizAnalyser.connect(_vizCtx.destination);
+    } catch (e) {
+        _vizFakeMode = true;
+    }
+    startVisualizerLoop();
+}
+
+function startVisualizerLoop() {
+    const canvas = document.getElementById('playerVisualizer');
+    const bgCanvas = document.getElementById('bgVisualizer');
+    if (!canvas && !bgCanvas) return;
+    const ctx = canvas ? canvas.getContext('2d') : null;
+    const bgCtx = bgCanvas ? bgCanvas.getContext('2d') : null;
+    const bars = 24;
+    let fakePhase = 0;
+
+    function resizeBg() {
+        if (!bgCanvas) return;
+        const w = window.innerWidth;
+        if (bgCanvas.width !== w) bgCanvas.width = w;
+        if (bgCanvas.height !== 200) bgCanvas.height = 200;
+    }
+    if (bgCanvas) {
+        resizeBg();
+        window.addEventListener('resize', resizeBg);
+    }
+
+    function draw() {
+        const ae = getActiveAudio();
+        const playing = ae && !ae.paused && !ae.ended;
+        let data;
+        if (_vizAnalyser && !_vizFakeMode) {
+            data = new Uint8Array(_vizAnalyser.frequencyBinCount);
+            _vizAnalyser.getByteFrequencyData(data);
+        } else {
+            data = new Uint8Array(bars);
+            fakePhase += playing ? 0.15 : 0;
+            for (let i = 0; i < bars; i++) {
+                const intensity = playing ? (0.4 + 0.5 * Math.abs(Math.sin(fakePhase * 0.5 + i * 0.4) + Math.sin(fakePhase + i * 0.7) * 0.5)) : 0;
+                data[i] = Math.floor(intensity * 200);
+            }
+        }
+
+        if (ctx) {
+            const W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+            const barW = W / bars - 1;
+            for (let i = 0; i < bars; i++) {
+                const v = (data[i] || 0) / 255;
+                const h = Math.max(2, v * H * 0.95);
+                const x = i * (barW + 1);
+                const y = (H - h) / 2;
+                const hue = 240 - v * 180;
+                ctx.fillStyle = playing ? `hsl(${hue.toFixed(0)}, 80%, 60%)` : 'rgba(255,255,255,0.15)';
+                ctx.fillRect(x, y, barW, h);
+            }
+        }
+
+        if (bgCtx) {
+            const W = bgCanvas.width, H = bgCanvas.height;
+            bgCtx.clearRect(0, 0, W, H);
+            if (!playing) {
+                bgCanvas.classList.add('idle');
+            } else {
+                bgCanvas.classList.remove('idle');
+                const settings = _vizCurrentSettings || VIZ_DEFAULTS;
+                const bgBars = settings.bars || 48;
+                const bgBarW = W / bgBars;
+                const sens = (settings.sens || 100) / 100;
+                const smoothFactor = (settings.smooth || 0) / 100;
+
+                if (!_vizSmoothBuffer || _vizSmoothBuffer.length !== bgBars) {
+                    _vizSmoothBuffer = new Float32Array(bgBars);
+                }
+                const vals = new Float32Array(bgBars);
+                for (let i = 0; i < bgBars; i++) {
+                    const srcIdx = Math.floor((i / bgBars) * bars);
+                    let raw = ((data[srcIdx] || 0) / 255) * sens;
+                    if (raw > 1) raw = 1;
+                    const prev = _vizSmoothBuffer[i] || 0;
+                    const v = prev * smoothFactor + raw * (1 - smoothFactor);
+                    _vizSmoothBuffer[i] = v;
+                    vals[i] = v;
+                }
+
+                const colorAt = (i, v) => {
+                    const t = settings.theme;
+                    const baseHue = settings.hue || 280;
+                    const sat = '90%', light = '55%';
+                    if (t === 'rainbow') return `hsl(${(i / bgBars * 360).toFixed(0)}, ${sat}, ${light})`;
+                    if (t === 'warm') return `hsl(${(40 - v * 40).toFixed(0)}, ${sat}, ${light})`;
+                    if (t === 'cool') return `hsl(${(180 + v * 80).toFixed(0)}, ${sat}, ${light})`;
+                    if (t === 'green') return `hsl(${(120 + v * 60).toFixed(0)}, ${sat}, ${light})`;
+                    if (t === 'mono') return `hsl(${baseHue}, ${sat}, ${(40 + v * 30).toFixed(0)}%)`;
+                    if (t === 'custom') return `hsl(${baseHue}, ${sat}, ${(45 + v * 25).toFixed(0)}%)`;
+                    return `hsl(${(240 - v * 200).toFixed(0)}, 90%, 55%)`;
+                };
+
+                if (settings.glow) {
+                    bgCtx.shadowBlur = 12;
+                    bgCtx.shadowColor = colorAt(0, 0.5);
+                } else {
+                    bgCtx.shadowBlur = 0;
+                }
+
+                const drawBar = (i, v) => {
+                    const h = Math.max(2, v * H * 0.95);
+                    const x = i * bgBarW;
+                    const y = settings.reverse ? 0 : (H - h);
+                    bgCtx.fillStyle = colorAt(i, v);
+                    bgCtx.fillRect(x, y, bgBarW * 0.85, h);
+                };
+
+                if (settings.style === 'bars') {
+                    for (let i = 0; i < bgBars; i++) drawBar(i, vals[i]);
+                } else if (settings.style === 'mirror') {
+                    for (let i = 0; i < bgBars; i++) {
+                        const v = vals[i];
+                        const h = Math.max(2, v * H * 0.5);
+                        const x = i * bgBarW;
+                        bgCtx.fillStyle = colorAt(i, v);
+                        bgCtx.fillRect(x, H/2 - h, bgBarW * 0.85, h * 2);
+                    }
+                } else if (settings.style === 'wave' || settings.style === 'line') {
+                    bgCtx.beginPath();
+                    bgCtx.lineWidth = settings.style === 'line' ? 2 : 4;
+                    for (let i = 0; i < bgBars; i++) {
+                        const v = vals[i];
+                        const x = i * bgBarW + bgBarW / 2;
+                        const y = settings.reverse ? (v * H * 0.95) : (H - v * H * 0.95);
+                        if (i === 0) bgCtx.moveTo(x, y);
+                        else {
+                            const prevX = (i - 1) * bgBarW + bgBarW / 2;
+                            const prevY = settings.reverse ? (vals[i-1] * H * 0.95) : (H - vals[i-1] * H * 0.95);
+                            const cx = (prevX + x) / 2;
+                            bgCtx.quadraticCurveTo(cx, prevY, x, y);
+                        }
+                    }
+                    bgCtx.strokeStyle = colorAt(bgBars / 2, 0.7);
+                    bgCtx.stroke();
+                } else if (settings.style === 'filled') {
+                    bgCtx.beginPath();
+                    bgCtx.moveTo(0, settings.reverse ? 0 : H);
+                    for (let i = 0; i < bgBars; i++) {
+                        const v = vals[i];
+                        const x = i * bgBarW + bgBarW / 2;
+                        const y = settings.reverse ? (v * H * 0.95) : (H - v * H * 0.95);
+                        bgCtx.lineTo(x, y);
+                    }
+                    bgCtx.lineTo(W, settings.reverse ? 0 : H);
+                    bgCtx.closePath();
+                    const grad = bgCtx.createLinearGradient(0, 0, W, 0);
+                    grad.addColorStop(0, colorAt(0, 0.3));
+                    grad.addColorStop(0.5, colorAt(bgBars / 2, 0.7));
+                    grad.addColorStop(1, colorAt(bgBars - 1, 0.3));
+                    bgCtx.fillStyle = grad;
+                    bgCtx.fill();
+                } else if (settings.style === 'dots') {
+                    for (let i = 0; i < bgBars; i++) {
+                        const v = vals[i];
+                        const r = Math.max(2, v * Math.min(bgBarW, H) * 0.4);
+                        const x = i * bgBarW + bgBarW / 2;
+                        const y = settings.reverse ? (v * H * 0.95) : (H - v * H * 0.95);
+                        bgCtx.fillStyle = colorAt(i, v);
+                        bgCtx.beginPath();
+                        bgCtx.arc(x, y, r, 0, Math.PI * 2);
+                        bgCtx.fill();
+                    }
+                }
+            }
+        }
+
+        _vizRaf = requestAnimationFrame(draw);
+    }
+    cancelAnimationFrame(_vizRaf);
+    draw();
+}
+
+setTimeout(function setupVisualizer() {
+    const ae = document.getElementById('audioEl');
+    if (!ae) { setTimeout(setupVisualizer, 200); return; }
+    ae.addEventListener('play', () => {
+        if (_vizCtx && _vizCtx.state === 'suspended') _vizCtx.resume();
+        if (!_vizSource && !_vizFakeMode) initVisualizer();
+        else if (!_vizRaf) startVisualizerLoop();
+    });
+    initVisualizer();
+    loadVizSettings();
+}, 0);
+
+// ===== Reglages spectre visuel =====
+const VIZ_DEFAULTS = {
+    enabled: true, opacity: 32, blur: 14, sat: 150, height: 200, blend: 'screen', pos: 'top',
+    theme: 'auto', hue: 280, style: 'bars', bars: 48, sens: 100, smooth: 30, glow: false, reverse: false
+};
+const VIZ_KEY = 'yt_viz_settings';
+let _vizCurrentSettings = Object.assign({}, VIZ_DEFAULTS);
+let _vizSmoothBuffer = null;
+
+function loadVizSettings() {
+    let s;
+    try { s = JSON.parse(localStorage.getItem(VIZ_KEY) || '{}'); } catch (e) { s = {}; }
+    s = Object.assign({}, VIZ_DEFAULTS, s);
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+    const setCheck = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+    setCheck('vizEnabled', s.enabled !== false);
+    setVal('vizOpacity', s.opacity);
+    setVal('vizBlur', s.blur);
+    setVal('vizSat', s.sat);
+    setVal('vizHeight', s.height);
+    setVal('vizBlend', s.blend);
+    setVal('vizPos', s.pos);
+    setVal('vizTheme', s.theme);
+    setVal('vizHue', s.hue);
+    setVal('vizStyle', s.style);
+    setVal('vizBars', s.bars);
+    setVal('vizSens', s.sens);
+    setVal('vizSmooth', s.smooth);
+    setCheck('vizGlow', s.glow);
+    setCheck('vizReverse', s.reverse);
+    applyVizSettings(s);
+}
+
+function updateVizSettings() {
+    const get = (id) => document.getElementById(id);
+    const s = {
+        enabled: get('vizEnabled').checked,
+        opacity: +get('vizOpacity').value,
+        blur: +get('vizBlur').value,
+        sat: +get('vizSat').value,
+        height: +get('vizHeight').value,
+        blend: get('vizBlend').value,
+        pos: get('vizPos').value,
+        theme: get('vizTheme').value,
+        hue: +get('vizHue').value,
+        style: get('vizStyle').value,
+        bars: +get('vizBars').value,
+        sens: +get('vizSens').value,
+        smooth: +get('vizSmooth').value,
+        glow: get('vizGlow').checked,
+        reverse: get('vizReverse').checked
+    };
+    localStorage.setItem(VIZ_KEY, JSON.stringify(s));
+    applyVizSettings(s);
+}
+
+function applyVizSettings(s) {
+    _vizCurrentSettings = s;
+    _vizSmoothBuffer = null;
+    const canvas = document.getElementById('bgVisualizer');
+    if (!canvas) return;
+    const labels = {
+        vizOpacityVal: s.opacity + '%',
+        vizBlurVal: s.blur + 'px',
+        vizSatVal: (s.sat / 100).toFixed(2),
+        vizHeightVal: s.height + 'px',
+        vizHueVal: s.hue + '°',
+        vizBarsVal: s.bars,
+        vizSensVal: (s.sens / 100).toFixed(2),
+        vizSmoothVal: s.smooth + '%'
+    };
+    for (const id in labels) { const el = document.getElementById(id); if (el) el.textContent = labels[id]; }
+    const customRow = document.getElementById('vizCustomHueRow');
+    if (customRow) customRow.style.display = (s.theme === 'custom' || s.theme === 'mono') ? 'block' : 'none';
+
+    if (!s.enabled) {
+        canvas.style.display = 'none';
+        return;
+    }
+    canvas.style.display = '';
+    canvas.style.opacity = (s.opacity / 100).toString();
+    canvas.style.filter = `blur(${s.blur}px) saturate(${s.sat / 100})`;
+    canvas.style.mixBlendMode = s.blend;
+    canvas.style.height = s.height + 'px';
+
+    if (s.pos === 'top') {
+        canvas.style.top = '0'; canvas.style.bottom = ''; canvas.style.transform = '';
+        canvas.style.maskImage = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0) 100%)';
+    } else if (s.pos === 'bottom') {
+        canvas.style.top = ''; canvas.style.bottom = '90px'; canvas.style.transform = '';
+        canvas.style.maskImage = 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0) 100%)';
+    } else if (s.pos === 'middle') {
+        canvas.style.top = '50%'; canvas.style.bottom = ''; canvas.style.transform = 'translateY(-50%)';
+        canvas.style.maskImage = 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%)';
+    } else if (s.pos === 'full') {
+        canvas.style.top = '0'; canvas.style.bottom = '0'; canvas.style.transform = '';
+        canvas.style.height = '100vh';
+        canvas.style.maskImage = 'none';
+    }
+    canvas.style.webkitMaskImage = canvas.style.maskImage;
+
+    if (typeof startVisualizerLoop === 'function') {
+        cancelAnimationFrame(_vizRaf);
+        startVisualizerLoop();
+    }
+}
+
+function resetVizSettings() {
+    localStorage.removeItem(VIZ_KEY);
+    loadVizSettings();
+    showToast('Reglages spectre reinitialises');
+}
+
+function getCurrentPlayingTrack() {
+    if (playbackContext === 'flow' && typeof flowCurrentIdx !== 'undefined' && flowTracks && flowTracks[flowCurrentIdx]) {
+        return { kind: 'flow', track: flowTracks[flowCurrentIdx] };
+    }
+    if (playbackContext === 'library' && typeof playlist !== 'undefined' && playlist && playlist[playIndex]) {
+        return { kind: 'library', track: playlist[playIndex] };
+    }
+    if (playbackContext === 'history' && typeof historyCache !== 'undefined' && typeof currentStreamIdx !== 'undefined' && historyCache[currentStreamIdx]) {
+        return { kind: 'history', track: historyCache[currentStreamIdx] };
+    }
+    if (playbackContext === 'search' && typeof lastSearchResults !== 'undefined' && typeof searchPlayIdx !== 'undefined' && lastSearchResults[searchPlayIdx]) {
+        return { kind: 'search', track: lastSearchResults[searchPlayIdx] };
+    }
+    return null;
+}
+
+function playerSyncLikeBtn() {
+    const btn = document.getElementById('btnPlayerLike');
+    if (!btn) return;
+    const cur = getCurrentPlayingTrack();
+    if (!cur) { btn.style.display = 'none'; return; }
+    btn.style.display = 'flex';
+    btn.classList.remove('liked', 'add-to-flow', 'added');
+
+    if (cur.kind === 'flow') {
+        const liked = !!cur.track.liked;
+        btn.classList.toggle('liked', liked);
+        btn.innerHTML = liked ? '&#10084;' : '&#9825;';
+        btn.title = liked ? 'Retirer des aimes' : 'Aimer ce titre';
+        btn.dataset.action = 'flowLike';
+    } else if (cur.kind === 'library') {
+        const liked = !!cur.track.liked;
+        btn.classList.toggle('liked', liked);
+        btn.innerHTML = liked ? '&#10084;' : '&#9825;';
+        btn.title = liked ? 'Retirer des aimes' : 'Aimer ce titre';
+        btn.dataset.action = 'libLike';
+    } else {
+        const url = cur.track.url || '';
+        const vid = (url.match(/[?&]v=([^&]+)/) || url.match(/youtu\.be\/([^?&]+)/) || [])[1] || '';
+        const inFlow = vid && flowTracks && flowTracks.some(t => t.url && t.url.includes(vid));
+        if (inFlow) {
+            btn.classList.add('added');
+            btn.innerHTML = '&#10003;';
+            btn.title = 'Deja dans Mon Flow';
+            btn.dataset.action = 'noop';
+        } else {
+            btn.classList.add('add-to-flow');
+            btn.innerHTML = '+';
+            btn.title = 'Ajouter a Mon Flow';
+            btn.dataset.action = 'addFlow';
+        }
+    }
+}
+
+async function playerToggleLike() {
+    const btn = document.getElementById('btnPlayerLike');
+    const cur = getCurrentPlayingTrack();
+    if (!cur || !btn) return;
+    const action = btn.dataset.action;
+
+    if (action === 'flowLike') {
+        await flowToggleLike(cur.track.id, null);
+        const updated = flowTracks.find(t => t.id === cur.track.id);
+        if (updated) {
+            cur.track.liked = updated.liked;
+            showToast(updated.liked ? 'Aime' : 'J\'aime plus');
+        }
+        playerSyncLikeBtn();
+    } else if (action === 'libLike') {
+        await libToggleLike(cur.track.id, null);
+        const lib = (libraryData && libraryData.items) ? libraryData.items.find(i => i.id === cur.track.id) : null;
+        if (lib) {
+            cur.track.liked = lib.liked;
+            showToast(lib.liked ? 'Aime' : 'J\'aime plus');
+        }
+        playerSyncLikeBtn();
+    } else if (action === 'addFlow') {
+        try {
+            const t = cur.track;
+            const data = await apiPost('api/flow', {
+                action: 'add', url: t.url || '',
+                title: t.title || '', channel: t.channel || '',
+                thumbnail: t.thumbnail || '', duration: t.duration || '',
+                type: 'audio', format: 'mp3'
+            });
+            if (data.success) {
+                showToast(data.duplicate ? 'Deja dans Mon Flow' : 'Ajoute a Mon Flow');
+                if (typeof loadFlow === 'function') await loadFlow();
+                playerSyncLikeBtn();
+            }
+        } catch (e) { showToast('Erreur : ' + e.message); }
+    }
+}
 const audioEl = document.getElementById('audioEl');
+const audioElB = document.getElementById('audioElB');
 const videoEl = document.getElementById('videoEl');
+
+// ===== Crossfade : deux elements audio en bascule =====
+let _activeAudio = audioEl;
+function getActiveAudio() { return _activeAudio; }
+function getInactiveAudio() { return _activeAudio === audioEl ? audioElB : audioEl; }
+function setActiveAudio(el) { _activeAudio = el; }
+
+const CROSSFADE_KEY = 'yt_crossfade_seconds';
+const CROSSFADE_MAX = 8;
+function getCrossfadeSeconds() {
+    const v = parseInt(localStorage.getItem(CROSSFADE_KEY) || '0', 10);
+    if (isNaN(v) || v < 0) return 0;
+    return Math.min(CROSSFADE_MAX, v);
+}
+function setCrossfadeSeconds(n) {
+    const v = Math.max(0, Math.min(CROSSFADE_MAX, parseInt(n, 10) || 0));
+    localStorage.setItem(CROSSFADE_KEY, String(v));
+    const lbl = document.getElementById('prefCrossfadeVal');
+    if (lbl) lbl.textContent = v === 0 ? 'desactive' : (v + 's');
+    const sli = document.getElementById('prefCrossfadeSlider');
+    if (sli && parseInt(sli.value, 10) !== v) sli.value = String(v);
+}
+
+// Etat du crossfade en cours
+let _xfState = null; // { fromEl, toEl, startVol, intervalId, nextIdx, nextTrack, finalize }
+function isCrossfading() { return _xfState !== null; }
+function cancelCrossfade(snap) {
+    if (!_xfState) return;
+    const xf = _xfState;
+    clearInterval(xf.intervalId);
+    if (snap === 'commit' && xf.finalize) {
+        // Force la fin du crossfade : le toEl prend le relais a fond
+        xf.finalize();
+    } else {
+        // Annulation : on garde le fromEl, on coupe le toEl
+        try { xf.toEl.pause(); xf.toEl.src = ''; } catch (e) {}
+        xf.fromEl.volume = xf.startVol;
+        _xfState = null;
+    }
+}
+
+// Bind les listeners essentiels sur les DEUX elements
+function _bindAudioListenersOn(el) {
+    el.addEventListener('error', () => {
+        if (el !== getActiveAudio()) return;
+        if (playbackContext === 'flow' && flowCurrentIdx >= 0) {
+            console.warn('[Flow] Audio error, attempting retry...');
+            _streamRetry();
+        }
+    });
+    el.addEventListener('stalled', () => {
+        if (el !== getActiveAudio()) return;
+        if (playbackContext !== 'flow' || _streamRetrying) return;
+        setTimeout(() => {
+            if (el.paused || _streamRetrying) return;
+            if (el.readyState < 3) {
+                console.warn('[Flow] Stream stalled for too long, retrying...');
+                _streamRetry();
+            }
+        }, 8000);
+    });
+    el.addEventListener('waiting', () => {
+        if (el !== getActiveAudio()) return;
+        if (playbackContext !== 'flow' || _streamRetrying) return;
+        setTimeout(() => {
+            if (el.paused || _streamRetrying) return;
+            if (el.readyState < 3) {
+                console.warn('[Flow] Buffering too long, retrying...');
+                _streamRetry();
+            }
+        }, 15000);
+    });
+}
+_bindAudioListenersOn(audioElB);
 
 // --- Stream recovery / retry ---
 let _streamRetryCount = 0;
@@ -791,32 +2592,32 @@ async function _streamRetry() {
     }
     _streamRetrying = true;
     _streamRetryCount++;
-    const savedTime = audioEl.currentTime || 0;
+    const ae = getActiveAudio();
+    const savedTime = ae.currentTime || 0;
     console.log('[Flow] Stream retry #' + _streamRetryCount + ' from ' + savedTime.toFixed(1) + 's');
 
     try {
         const t = flowTracks[flowCurrentIdx];
         if (!t || !t.url) { _streamRetrying = false; return; }
-        const resp = await fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + (flowCurrentType || 'audio'));
-        const data = await resp.json();
+        const data = await apiCall('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + (flowCurrentType || 'audio'));
         if (!data.success) { _streamRetrying = false; flowNext('audio'); return; }
 
-        audioEl.src = data.streamUrl;
-        audioEl.volume = document.getElementById('volumeSlider').value / 100;
+        ae.src = data.streamUrl;
+        ae.volume = document.getElementById('volumeSlider').value / 100;
 
-        audioEl.addEventListener('loadedmetadata', function _seekAfterRetry() {
-            audioEl.removeEventListener('loadedmetadata', _seekAfterRetry);
-            if (savedTime > 0 && savedTime < audioEl.duration) {
-                audioEl.currentTime = savedTime;
+        ae.addEventListener('loadedmetadata', function _seekAfterRetry() {
+            ae.removeEventListener('loadedmetadata', _seekAfterRetry);
+            if (savedTime > 0 && savedTime < ae.duration) {
+                ae.currentTime = savedTime;
             }
-            audioEl.play().catch(() => {});
+            ae.play().catch(() => {});
             _streamRetrying = false;
         }, { once: true });
 
         // Fallback si loadedmetadata ne fire pas
         setTimeout(() => {
             if (_streamRetrying) {
-                audioEl.play().catch(() => {});
+                ae.play().catch(() => {});
                 _streamRetrying = false;
             }
         }, 5000);
@@ -827,40 +2628,12 @@ async function _streamRetry() {
     }
 }
 
-audioEl.addEventListener('error', () => {
-    if (playbackContext === 'flow' && flowCurrentIdx >= 0) {
-        console.warn('[Flow] Audio error, attempting retry...');
-        _streamRetry();
-    }
-});
-
-audioEl.addEventListener('stalled', () => {
-    if (playbackContext !== 'flow' || _streamRetrying) return;
-    // Attendre 8s, si toujours stalled, retry
-    setTimeout(() => {
-        if (audioEl.paused || _streamRetrying) return;
-        if (audioEl.readyState < 3) {
-            console.warn('[Flow] Stream stalled for too long, retrying...');
-            _streamRetry();
-        }
-    }, 8000);
-});
-
-audioEl.addEventListener('waiting', () => {
-    if (playbackContext !== 'flow' || _streamRetrying) return;
-    // Si waiting dure > 15s, c'est probablement mort
-    setTimeout(() => {
-        if (audioEl.paused || _streamRetrying) return;
-        if (audioEl.readyState < 3) {
-            console.warn('[Flow] Buffering too long, retrying...');
-            _streamRetry();
-        }
-    }, 15000);
-});
+_bindAudioListenersOn(audioEl);
 
 // --- Persistance du lecteur ---
 function savePlayerState() {
     try {
+        const _ae = getActiveAudio();
         // Sauvegarder aussi l'etat Mon Flow
         if (flowCurrentIdx >= 0 && flowTracks[flowCurrentIdx]) {
             const t = flowTracks[flowCurrentIdx];
@@ -868,9 +2641,9 @@ function savePlayerState() {
                 trackId: t.id,
                 trackIdx: flowCurrentIdx,
                 type: flowCurrentType || 'audio',
-                currentTime: audioEl.currentTime || 0,
-                volume: audioEl.volume,
-                playing: !audioEl.paused,
+                currentTime: _ae.currentTime || 0,
+                volume: _ae.volume,
+                playing: !_ae.paused,
                 shuffle: flowShuffle,
                 playbackContext: 'flow'
             }));
@@ -880,9 +2653,9 @@ function savePlayerState() {
         localStorage.removeItem('flow_state');
         localStorage.setItem('player_state', JSON.stringify({
             playlist, playIndex, playMode, playbackContext,
-            currentTime: audioEl.currentTime || 0,
-            volume: audioEl.volume,
-            playing: !audioEl.paused
+            currentTime: _ae.currentTime || 0,
+            volume: _ae.volume,
+            playing: !_ae.paused
         }));
     } catch (e) {}
 }
@@ -905,6 +2678,7 @@ function restorePlayerState() {
         playIndex = state.playIndex || 0;
         playMode = state.playMode || 'normal';
         playbackContext = state.playbackContext || 'library';
+        if (typeof playerSyncModeButtons === 'function') playerSyncModeButtons();
 
         const item = getItemById(playlist[playIndex]);
         if (!item || item.type === 'video') return;
@@ -937,8 +2711,7 @@ function restorePlayerState() {
 async function restoreFlowState(state) {
     // Charger les tracks de Mon Flow
     try {
-        const resp = await fetch('api/flow?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/flow?action=list');
         if (!data.success) return;
         flowTracks = data.tracks || [];
         flowPlaylists = data.playlists || [];
@@ -952,7 +2725,7 @@ async function restoreFlowState(state) {
     flowCurrentIdx = idx;
     flowCurrentType = state.type || 'audio';
     flowShuffle = state.shuffle || false;
-    playbackContext = 'flow';
+    setPlayerSource('flow');
 
     // Afficher le player bar
     const bar = document.getElementById('playerBar');
@@ -970,8 +2743,7 @@ async function restoreFlowState(state) {
 
     // Recuperer le flux stream
     try {
-        const resp = await fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + flowCurrentType);
-        const data = await resp.json();
+        const data = await apiCall('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + flowCurrentType);
         if (!data.success) {
             document.getElementById('playerArtist').textContent = 'Erreur : flux indisponible';
             return;
@@ -995,8 +2767,8 @@ async function restoreFlowState(state) {
         document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Streaming';
         if (state.playing) document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
 
-        // Remettre le onended
-        audioEl.onended = function() { flowNext(flowCurrentType); };
+        // L'auto-next est gere globalement via _onAudioEnded
+        audioEl.onended = null;
 
         // Pre-charger le suivant
         flowPreloadNext(idx, flowCurrentType);
@@ -1058,7 +2830,7 @@ function playCurrentItem() {
     if (playIndex < 0 || playIndex >= playlist.length) return;
     const item = getItemById(playlist[playIndex]);
     if (!item) return;
-    playbackContext = 'library';
+    setPlayerSource('library');
 
     if (item.type === 'video') {
         playVideo(item);
@@ -1071,6 +2843,11 @@ function playAudio(item) {
     // Hide video overlay if open
     document.getElementById('videoOverlay').classList.remove('active');
     videoEl.pause();
+
+    // Library : on n'utilise jamais le crossfade -> assurer que audioEl est l'actif et nettoyer audioElB
+    if (isCrossfading()) cancelCrossfade('cancel');
+    try { audioElB.pause(); audioElB.src = ''; } catch (e) {}
+    setActiveAudio(audioEl);
 
     audioEl.src = item.file;
     audioEl.volume = document.getElementById('volumeSlider').value / 100;
@@ -1153,7 +2930,8 @@ function previewYouTube(videoId, title) {
 }
 
 function playerToggle() {
-    const a = document.getElementById('audioEl');
+    if (isCrossfading()) cancelCrossfade('commit');
+    const a = getActiveAudio();
     if (a.paused) {
         a.play();
         document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
@@ -1175,8 +2953,10 @@ function playerNext() {
     }
     // Contexte library
     if (playlist.length === 0) return;
+    if (isCrossfading()) cancelCrossfade('commit');
+    const aN = getActiveAudio();
     if (playMode === 'loopOne') {
-        audioEl.currentTime = 0; audioEl.play(); return;
+        aN.currentTime = 0; aN.play(); return;
     }
     playIndex++;
     if (playIndex >= playlist.length) {
@@ -1185,7 +2965,7 @@ function playerNext() {
             if (playMode === 'shuffle') shufflePlaylist();
         } else {
             playIndex = playlist.length - 1;
-            audioEl.pause();
+            aN.pause();
             document.getElementById('btnPlayPause').innerHTML = '&#9654;';
             return;
         }
@@ -1205,9 +2985,11 @@ function playerPrev() {
     }
     // Contexte library
     if (playlist.length === 0) return;
+    if (isCrossfading()) cancelCrossfade('commit');
+    const aP = getActiveAudio();
     // If more than 3s in, restart current track
-    if (audioEl.currentTime > 3) {
-        audioEl.currentTime = 0; return;
+    if (aP.currentTime > 3) {
+        aP.currentTime = 0; return;
     }
     playIndex--;
     if (playIndex < 0) {
@@ -1220,55 +3002,311 @@ function playerPrev() {
     playCurrentItem();
 }
 
+function playerSyncModeButtons() {
+    const map = { btnLoop: 'loop', btnLoopOne: 'loopOne', btnShuffle: 'shuffle' };
+    for (const id in map) {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('active-mode', playMode === map[id]);
+    }
+}
+
 function playerSetMode(mode) {
     if (playMode === mode) {
         playMode = 'normal';
     } else {
         playMode = mode;
     }
-    // Update button styles
-    document.getElementById('btnLoop').classList.toggle('active-mode', playMode === 'loop');
-    document.getElementById('btnLoopOne').classList.toggle('active-mode', playMode === 'loopOne');
-    document.getElementById('btnShuffle').classList.toggle('active-mode', playMode === 'shuffle');
+    playerSyncModeButtons();
+    // Sync flowShuffle si on est dans le contexte Mon Flow
+    if (playbackContext === 'flow') {
+        const wantShuffle = (playMode === 'shuffle');
+        if (flowShuffle !== wantShuffle) {
+            flowShuffle = wantShuffle;
+            const fb = document.getElementById('flowShuffleBtn');
+            if (fb) fb.classList.toggle('active', flowShuffle);
+            flowPreloaded = null;
+        }
+    }
 }
 
 function playerSetVolume(val) {
-    audioEl.volume = val / 100;
-    videoEl.volume = val / 100;
+    const v = val / 100;
+    if (isCrossfading()) {
+        // Pendant un crossfade, on conserve la proportion entre les 2 elements
+        const xf = _xfState;
+        const ratioFrom = xf.fromEl.volume / Math.max(0.0001, xf.startVol);
+        const ratioTo = xf.toEl.volume / Math.max(0.0001, xf.startVol);
+        xf.startVol = v;
+        xf.fromEl.volume = Math.max(0, Math.min(1, v * ratioFrom));
+        xf.toEl.volume = Math.max(0, Math.min(1, v * ratioTo));
+    } else {
+        getActiveAudio().volume = v;
+    }
+    videoEl.volume = v;
     savePlayerState();
 }
 
 function playerMute() {
     const slider = document.getElementById('volumeSlider');
-    if (audioEl.volume > 0) {
+    const a = getActiveAudio();
+    if (a.volume > 0) {
         slider.dataset.prev = slider.value;
         slider.value = 0;
-        audioEl.volume = 0;
+        playerSetVolume(0);
     } else {
         slider.value = slider.dataset.prev || 80;
-        audioEl.volume = slider.value / 100;
+        playerSetVolume(slider.value);
     }
 }
 
 function seekPlayer(e) {
-    if (!audioEl.duration) return;
+    const a = getActiveAudio();
+    if (!a.duration) return;
+    if (isCrossfading()) cancelCrossfade('commit');
     const rect = e.target.getBoundingClientRect();
     const pct = (e.clientX - rect.left) / rect.width;
-    audioEl.currentTime = pct * audioEl.duration;
+    a.currentTime = pct * a.duration;
     savePlayerState();
 }
 
+// ===== Raccourcis clavier =====
+document.addEventListener('keydown', (e) => {
+    const tag = (e.target.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const playerActive = document.getElementById('playerBar').classList.contains('active');
+    if (!playerActive && e.key !== '?') return;
+
+    let handled = true;
+    switch (e.key) {
+        case ' ':
+        case 'k':
+            playerToggle(); break;
+        case 'ArrowRight': {
+            const a = getActiveAudio();
+            if (a.duration) { if (isCrossfading()) cancelCrossfade('commit'); a.currentTime = Math.min(a.duration, a.currentTime + 10); savePlayerState(); showShortcutHint('+10s'); }
+            break;
+        }
+        case 'ArrowLeft': {
+            const a = getActiveAudio();
+            if (a.duration) { if (isCrossfading()) cancelCrossfade('commit'); a.currentTime = Math.max(0, a.currentTime - 10); savePlayerState(); showShortcutHint('-10s'); }
+            break;
+        }
+        case 'ArrowUp': {
+            const slider = document.getElementById('volumeSlider');
+            const v = Math.min(100, parseInt(slider.value, 10) + 5);
+            slider.value = v; playerSetVolume(v); showShortcutHint('Volume ' + v + '%');
+            break;
+        }
+        case 'ArrowDown': {
+            const slider = document.getElementById('volumeSlider');
+            const v = Math.max(0, parseInt(slider.value, 10) - 5);
+            slider.value = v; playerSetVolume(v); showShortcutHint('Volume ' + v + '%');
+            break;
+        }
+        case 'm':
+            playerMute(); showShortcutHint('Mute'); break;
+        case 'n':
+            playerNext(); showShortcutHint('Suivant'); break;
+        case 'p':
+            playerPrev(); showShortcutHint('Precedent'); break;
+        case 'f':
+        case 'F':
+            playerToggleLike(); break;
+        case 's':
+            playerSetMode('shuffle'); showShortcutHint('Aleatoire'); break;
+        case 'l':
+            playerSetMode('loop'); showShortcutHint('Boucle'); break;
+        case '?':
+            showShortcutsHelp(); break;
+        default:
+            handled = false;
+    }
+    if (handled) e.preventDefault();
+});
+
+let _shortcutHintTimer = null;
+function showShortcutHint(text) {
+    let el = document.getElementById('shortcutHint');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'shortcutHint';
+        el.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;z-index:9999;pointer-events:none;transition:opacity 0.3s;';
+        document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.style.opacity = '1';
+    clearTimeout(_shortcutHintTimer);
+    _shortcutHintTimer = setTimeout(() => { el.style.opacity = '0'; }, 1000);
+}
+
+// ===== Sleep timer =====
+let sleepTimerEnd = 0;
+let sleepTimerInterval = null;
+let sleepTimerEndOfTrack = false;
+
+function showSleepTimer() {
+    if (sleepTimerEnd || sleepTimerEndOfTrack) {
+        const remaining = sleepTimerEnd ? Format.duration(sleepTimerEnd - Date.now()) : 'fin du titre en cours';
+        Modal.confirm({
+            title: 'Sleep timer actif',
+            message: `Lecture stoppera dans <b>${remaining}</b>.<br><br>Annuler le timer ?`,
+            confirmText: 'Annuler le timer',
+            cancelText: 'Garder',
+            danger: true
+        }).then(ok => { if (ok) cancelSleepTimer(); });
+        return;
+    }
+    Modal.custom({
+        title: 'Sleep timer',
+        width: 380,
+        html: `
+            <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Stoppe la lecture apres un delai (fade-out 5s a la fin).</p>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+                <button class="sleep-preset" data-min="5">5 min</button>
+                <button class="sleep-preset" data-min="15">15 min</button>
+                <button class="sleep-preset" data-min="30">30 min</button>
+                <button class="sleep-preset" data-min="45">45 min</button>
+                <button class="sleep-preset" data-min="60">1 h</button>
+                <button class="sleep-preset" data-min="90">1 h 30</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;">
+                <input type="number" id="sleepCustom" min="1" max="600" placeholder="Custom (min)" style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:13px;">
+                <button class="sleep-preset" data-act="custom">OK</button>
+            </div>
+            <button class="sleep-preset" data-act="endoftrack" style="width:100%;background:var(--bg-hover);">&#9836; Stopper a la fin du titre en cours</button>
+            <div class="modal-btns" style="margin-top:14px;">
+                <button class="btn-cancel" data-act="cancel">Annuler</button>
+            </div>
+        `,
+        onMount: (root, close) => {
+            root.querySelectorAll('[data-min]').forEach(b => {
+                b.onclick = () => { startSleepTimer(parseInt(b.dataset.min, 10)); close(); };
+            });
+            root.querySelector('[data-act="custom"]').onclick = () => {
+                const v = parseInt(root.querySelector('#sleepCustom').value, 10);
+                if (v > 0 && v <= 600) { startSleepTimer(v); close(); }
+            };
+            root.querySelector('[data-act="endoftrack"]').onclick = () => {
+                startSleepEndOfTrack(); close();
+            };
+            root.querySelector('[data-act="cancel"]').onclick = close;
+        }
+    });
+}
+
+function startSleepTimer(minutes) {
+    cancelSleepTimer();
+    sleepTimerEnd = Date.now() + minutes * 60000;
+    sleepTimerInterval = setInterval(updateSleepBadge, 1000);
+    updateSleepBadge();
+    showToast(`Sleep timer : ${minutes} min`);
+}
+
+function startSleepEndOfTrack() {
+    cancelSleepTimer();
+    sleepTimerEndOfTrack = true;
+    const audio = audioEl;
+    const onceEnded = () => {
+        cancelSleepTimer();
+        audio.removeEventListener('ended', onceEnded);
+    };
+    audio.addEventListener('ended', onceEnded);
+    const btn = document.getElementById('btnSleepTimer');
+    const badge = document.getElementById('sleepTimerBadge');
+    btn.classList.add('active');
+    badge.style.display = 'inline';
+    badge.textContent = ' fin';
+    showToast('Sleep timer : fin du titre en cours');
+}
+
+function cancelSleepTimer() {
+    sleepTimerEnd = 0;
+    sleepTimerEndOfTrack = false;
+    if (sleepTimerInterval) { clearInterval(sleepTimerInterval); sleepTimerInterval = null; }
+    const btn = document.getElementById('btnSleepTimer');
+    const badge = document.getElementById('sleepTimerBadge');
+    if (btn) btn.classList.remove('active');
+    if (badge) { badge.style.display = 'none'; badge.textContent = ''; }
+}
+
+function updateSleepBadge() {
+    const remaining = sleepTimerEnd - Date.now();
+    const btn = document.getElementById('btnSleepTimer');
+    const badge = document.getElementById('sleepTimerBadge');
+    if (!btn || !badge) return;
+    if (remaining <= 0) {
+        cancelSleepTimer();
+        sleepFadeOutAndStop();
+        return;
+    }
+    btn.classList.add('active');
+    badge.style.display = 'inline';
+    const totalSec = Math.ceil(remaining / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    badge.textContent = ' ' + (m > 0 ? `${m}:${String(s).padStart(2,'0')}` : `${s}s`);
+}
+
+function sleepFadeOutAndStop() {
+    if (isCrossfading()) cancelCrossfade('cancel');
+    const a = getActiveAudio();
+    if (!a || a.paused) return;
+    const startVol = a.volume;
+    const steps = 20, duration = 5000;
+    let i = 0;
+    const fade = setInterval(() => {
+        i++;
+        a.volume = startVol * (1 - i / steps);
+        if (i >= steps) {
+            clearInterval(fade);
+            a.pause();
+            a.volume = startVol;
+            showToast('Sleep timer atteint - lecture stoppee');
+        }
+    }, duration / steps);
+}
+
+function showShortcutsHelp() {
+    Modal.custom({
+        title: 'Raccourcis clavier',
+        width: 380,
+        html: `
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px;align-items:center;">
+                <kbd>Espace</kbd><span>Lecture / Pause</span>
+                <kbd>K</kbd><span>Lecture / Pause (alternative)</span>
+                <kbd>&larr; / &rarr;</kbd><span>Reculer / Avancer 10s</span>
+                <kbd>&uarr; / &darr;</kbd><span>Volume + / -</span>
+                <kbd>M</kbd><span>Couper le son</span>
+                <kbd>N / P</kbd><span>Suivant / Precedent</span>
+                <kbd>F</kbd><span>Aimer / Retirer (ou ajout Mon Flow)</span>
+                <kbd>S</kbd><span>Aleatoire</span>
+                <kbd>L</kbd><span>Boucle</span>
+                <kbd>?</kbd><span>Afficher cette aide</span>
+            </div>
+            <div class="modal-btns" style="margin-top:18px;">
+                <button class="btn-cancel" data-act="cancel">Fermer</button>
+            </div>
+        `,
+        onMount: (root, close) => {
+            root.querySelector('[data-act="cancel"]').onclick = close;
+        }
+    });
+}
+
 function playerClose() {
-    audioEl.pause();
-    audioEl.src = '';
-    audioEl.onended = null;
+    if (isCrossfading()) cancelCrossfade('cancel');
+    audioEl.pause(); audioEl.src = ''; audioEl.onended = null;
+    audioElB.pause(); audioElB.src = ''; audioElB.onended = null;
+    setActiveAudio(audioEl);
     document.getElementById('playerBar').classList.remove('active');
     document.body.classList.remove('player-open');
     document.getElementById('playerQueue').style.display = 'none';
     playlist = [];
     flowCurrentIdx = -1;
     flowPreloaded = null;
-    playbackContext = 'library';
+    setPlayerSource('library');
     document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
     localStorage.removeItem('player_state');
     localStorage.removeItem('flow_state');
@@ -1276,14 +3314,21 @@ function playerClose() {
 
 function togglePlayerQueue() {
     const panel = document.getElementById('playerQueue');
-    const btn = document.querySelector('.player-queue-btn');
+    const btn = document.querySelector('.player-queue-btn:not(#btnPlayerLyrics)');
     if (panel.style.display === 'none') {
+        // Fermer le panneau Paroles s'il est ouvert
+        const lp = document.getElementById('lyricsPanel');
+        if (lp && lp.style.display !== 'none') {
+            lp.style.display = 'none';
+            const lbtn = document.getElementById('btnPlayerLyrics');
+            if (lbtn) lbtn.classList.remove('active');
+        }
         panel.style.display = 'flex';
-        btn.classList.add('active');
+        if (btn) btn.classList.add('active');
         renderPlayerQueue();
     } else {
         panel.style.display = 'none';
-        btn.classList.remove('active');
+        if (btn) btn.classList.remove('active');
     }
 }
 
@@ -1345,19 +3390,28 @@ function formatTime(s) {
 
 // Audio events
 let _lastPlayerSave = 0;
-audioEl.addEventListener('timeupdate', () => {
-    if (!audioEl.duration) return;
-    const pct = (audioEl.currentTime / audioEl.duration) * 100;
+function _onActiveTimeUpdate(ev) {
+    const el = ev.target;
+    if (el !== getActiveAudio()) return;
+    if (!el.duration) return;
+    const pct = (el.currentTime / el.duration) * 100;
     document.getElementById('playerSeekFill').style.width = pct + '%';
-    document.getElementById('playerTime').textContent = formatTime(audioEl.currentTime) + ' / ' + formatTime(audioEl.duration);
+    document.getElementById('playerTime').textContent = formatTime(el.currentTime) + ' / ' + formatTime(el.duration);
     // Sauvegarder la position toutes les 3 secondes
     const now = Date.now();
     if (now - _lastPlayerSave > 3000) { _lastPlayerSave = now; savePlayerState(); }
-});
-
-audioEl.addEventListener('ended', () => {
+    // Declencher le crossfade si on s'approche de la fin
+    maybeStartCrossfade(el);
+}
+function _onAudioEnded(ev) {
+    if (ev.target !== getActiveAudio()) return;
+    if (isCrossfading()) return; // le crossfade gere lui-meme la transition
     playerNext();
-});
+}
+audioEl.addEventListener('timeupdate', _onActiveTimeUpdate);
+audioElB.addEventListener('timeupdate', _onActiveTimeUpdate);
+audioEl.addEventListener('ended', _onAudioEnded);
+audioElB.addEventListener('ended', _onAudioEnded);
 
 // Video ended -> next
 videoEl.addEventListener('ended', () => {
@@ -1366,7 +3420,9 @@ videoEl.addEventListener('ended', () => {
 });
 
 // ========== PROFILE ==========
-let currentUser = null;
+// var (et non let) pour exposer sur window -> helpers.js peut injecter
+// automatiquement profile=<currentUser.id> sur les appels api/flow et api/library.
+var currentUser = null;
 
 function getCookie(name) {
     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -1374,8 +3430,7 @@ function getCookie(name) {
 }
 
 async function loadProfilesList() {
-    const resp = await fetch('api/profile?action=list');
-    const data = await resp.json();
+    const data = await apiCall('api/profile?action=list');
     const container = document.getElementById('profilesList');
     if (!data.success || data.profiles.length === 0) {
         container.innerHTML = '<p style="color:#555; font-size:13px;">Aucun profil pour le moment.</p>';
@@ -1383,24 +3438,52 @@ async function loadProfilesList() {
     }
     container.innerHTML = data.profiles.map(p => {
         const initial = p.username.charAt(0).toUpperCase();
-        return '<div class="profile-option" onclick="selectProfile(\'' + p.username.replace(/'/g, "\\'") + '\')">'
+        const safeName = p.username.replace(/'/g, "\\'");
+        return '<div class="profile-option">'
+            + '<div class="po-clickzone" onclick="selectProfile(\'' + safeName + '\')">'
             + '<div class="po-avatar">' + initial + '</div>'
             + '<div class="po-info">'
-            + '<div class="po-name">' + p.username + '</div>'
+            + '<div class="po-name">' + escapeHtml(p.username) + '</div>'
             + '<div class="po-meta">' + (p.download_count || 0) + ' telechargements</div>'
-            + '</div></div>';
+            + '</div>'
+            + '</div>'
+            + '<button class="po-delete" onclick="event.stopPropagation(); deleteProfile(\'' + safeName + '\')" title="Supprimer ce profil">&times;</button>'
+            + '</div>';
     }).join('');
 }
 
+async function deleteProfile(username) {
+    if (!confirm('Supprimer le profil "' + username + '" ?\n\nCela effacera aussi toutes ses pistes Mon Flow, ses playlists, sa corbeille et ses statistiques d\'ecoute.\n\nLes fichiers telecharges sur le disque ne sont PAS effaces.\n\nCette action est irreversible.')) return;
+    try {
+        const data = await apiPost('api/profile', { action: 'delete', username });
+        if (!data.success) { alert('Erreur : ' + (data.error || 'inconnue')); return; }
+        const summary = 'Profil supprime.\n\n'
+            + 'Mon Flow : ' + data.flowTracks + ' pistes, ' + data.flowPlaylists + ' playlists, ' + data.flowTrash + ' corbeille\n'
+            + 'Stats : ' + data.statsDeleted + ' evenements supprimes';
+        alert(summary);
+        // Si on a supprime son propre profil, deconnecter
+        if (currentUser && currentUser.id === data.profileId) {
+            currentUser = null; window.currentUser = null;
+            document.cookie = 'yt_user=;max-age=0;path=/';
+            localStorage.removeItem('yt_user');
+            location.reload();
+            return;
+        }
+        loadProfilesList();
+    } catch (e) {
+        alert('Erreur reseau : ' + e.message);
+    }
+}
+
 async function selectProfile(username) {
-    const resp = await fetch('api/profile?action=load&username=' + encodeURIComponent(username));
-    const data = await resp.json();
+    const data = await apiCall('api/profile?action=load&username=' + encodeURIComponent(username));
     if (data.success) {
         currentUser = data.profile;
         document.cookie = 'yt_user=' + encodeURIComponent(username) + ';max-age=' + (86400*3650) + ';path=/';
         localStorage.setItem('yt_user', username);
         showProfile();
         applyPrefs();
+        if (typeof loadFlow === 'function') { try { await loadFlow(); } catch (e) {} }
     }
 }
 
@@ -1408,24 +3491,19 @@ async function loginUser() {
     const name = document.getElementById('loginName').value.trim();
     if (!name) return;
 
-    const resp = await fetch('api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=save&username=' + encodeURIComponent(name)
-    });
-    const data = await resp.json();
+    const data = await apiPost('api/profile', { action: 'save', username: name });
     if (data.success) {
         currentUser = data.profile;
         document.cookie = 'yt_user=' + encodeURIComponent(name) + ';max-age=' + (86400*3650) + ';path=/';
         localStorage.setItem('yt_user', name);
         showProfile();
         applyPrefs();
+        if (typeof loadFlow === 'function') { try { await loadFlow(); } catch (e) {} }
     }
 }
 
 async function loadProfile(username) {
-    const resp = await fetch('api/profile?action=load&username=' + encodeURIComponent(username));
-    const data = await resp.json();
+    const data = await apiCall('api/profile?action=load&username=' + encodeURIComponent(username));
     if (data.success) {
         currentUser = data.profile;
         showProfile();
@@ -1456,6 +3534,17 @@ function showProfile() {
     document.getElementById('prefFormatVideo').value = currentUser.pref_format_video || 'mp4';
     document.getElementById('prefQualityVideo').value = currentUser.pref_quality_video || 'best';
     document.getElementById('prefCover').checked = (currentUser.pref_cover === '1');
+    const prefSearchSel = document.getElementById('prefSearchHistoryLimit');
+    if (prefSearchSel) prefSearchSel.value = String(getSearchHistoryDisplayLimit());
+    const xfSec = getCrossfadeSeconds();
+    const xfSli = document.getElementById('prefCrossfadeSlider');
+    const xfLbl = document.getElementById('prefCrossfadeVal');
+    if (xfSli) xfSli.value = String(xfSec);
+    if (xfLbl) xfLbl.textContent = xfSec === 0 ? 'desactive' : (xfSec + 's');
+    const fnotif = document.getElementById('prefFlowNotif');
+    if (fnotif) fnotif.checked = (localStorage.getItem('yt_flow_notif_on') === '1');
+    const lyrAuto = document.getElementById('prefLyricsAuto');
+    if (lyrAuto) lyrAuto.checked = (localStorage.getItem('yt_lyrics_auto') === '1');
 
     // Welcome bar
     document.getElementById('welcomeBar').style.display = 'flex';
@@ -1534,11 +3623,11 @@ const STRATEGY_DETAILS = {
 
 function recordEphemeralListen(r) {
     if (!r || !r.url) return;
-    const params = new URLSearchParams({
-        action: 'record', kind: 'stream', source: 'audio',
-        title: r.title || '', channel: r.channel || '', url: r.url, format: 'stream'
-    });
-    fetch('api/stats?' + params.toString()).catch(() => {});
+    apiPost('api/stats?action=record', {
+        kind: 'stream', source: 'audio',
+        title: r.title || '', channel: r.channel || '',
+        url: r.url, format: 'stream'
+    }).catch(() => {});
 }
 
 function setStatsSubtab(sub) {
@@ -1602,10 +3691,10 @@ function renderEphemeralList(items) {
         list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:30px;">Aucun resultat. Tes ecoutes en streaming depuis la recherche apparaitront ici.</div>';
         return;
     }
-    const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+    const esc = escapeHtml;
     const fmtDate = (ts) => {
-        const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-        return m ? `${m[3]}/${m[2]}/${m[1]} a ${m[4]}:${m[5]}` : '';
+        const d = Format.dateEU(ts), t = Format.timeEU(ts);
+        return d && t ? `${d} a ${t}` : '';
     };
     const vidFromUrl = (u) => { const m = (u || '').match(/[?&]v=([^&]+)|youtu\.be\/([^?&]+)/); return m ? (m[1] || m[2]) : ''; };
 
@@ -1615,12 +3704,13 @@ function renderEphemeralList(items) {
         const safeTitle = esc(it.title || '(sans titre)');
         const safeArtist = it.artist ? esc(it.artist) : '';
         return `<div class="ephem-row">
-            <div class="ephem-thumb">${thumb ? `<img src="${esc(thumb)}" alt="" onerror="this.style.display='none'">` : '&#127925;'}</div>
+            <div class="ephem-thumb" style="cursor:pointer" onclick="ephemPlay(${i})" title="Ecouter">${thumb ? `<img src="${esc(thumb)}" alt="" onerror="this.style.display='none'">` : '&#9654;'}</div>
             <div class="ephem-info">
                 <div class="ephem-title" title="${safeTitle}">${safeTitle}</div>
                 <div class="ephem-meta">${safeArtist ? safeArtist + ' &middot; ' : ''}<strong>${it.count}</strong> ecoute${it.count > 1 ? 's' : ''} &middot; dernier ${fmtDate(it.lastTs)}</div>
             </div>
             <div class="ephem-actions">
+                <button onclick="ephemPlay(${i})" title="Ecouter en streaming" class="ephem-btn ephem-btn-play">&#9654;</button>
                 <button onclick="ephemAddToFlow(${i})" title="Ajouter a Mon Flow" class="ephem-btn ephem-btn-flow">+ Flow</button>
                 <button onclick="ephemDownload(${i})" title="Telecharger" class="ephem-btn ephem-btn-dl">DL</button>
                 ${it.url ? `<a href="${esc(it.url)}" target="_blank" class="ephem-btn ephem-btn-yt" title="Ouvrir sur YouTube">YT</a>` : ''}
@@ -1640,10 +3730,7 @@ function ephemAddAllToFlow() {
         duration: ''
     }));
     openAddBulkToFlow(items, async () => {
-        await fetch('api/stats?action=forget_ephemeral', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'urls=' + encodeURIComponent(JSON.stringify(ephemeralCache.map(it => it.url)))
-        }).catch(() => {});
+        await apiPost('api/stats?action=forget_ephemeral', { urls: JSON.stringify(ephemeralCache.map(it => it.url)) }).catch(() => {});
         loadEphemeral();
     });
 }
@@ -1658,16 +3745,29 @@ async function ephemForgetAll() {
     } catch (e) { alert(e.message); }
 }
 
+function ephemPlay(idx) {
+    const sorted = currentFilteredEphemeral();
+    const it = sorted[idx];
+    if (!it || !it.url) return;
+    // Injecter en tete de lastSearchResults pour pouvoir reutiliser searchPlayAudio
+    if (!Array.isArray(lastSearchResults)) lastSearchResults = [];
+    lastSearchResults = [{
+        title: it.title || '',
+        channel: it.artist || '',
+        url: it.url,
+        thumbnail: ''
+    }];
+    if (typeof searchPlayAudio === 'function') {
+        searchPlayAudio(0);
+    }
+}
+
 async function ephemForget(idx) {
     const sorted = currentFilteredEphemeral();
     const it = sorted[idx];
     if (!it) return;
     try {
-        const resp = await fetch('api/stats?action=forget_ephemeral', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'urls=' + encodeURIComponent(JSON.stringify([it.url]))
-        });
-        const data = await resp.json();
+        const data = await apiPost('api/stats?action=forget_ephemeral', { urls: JSON.stringify([it.url]) });
         if (data.success) {
             showToast('Titre oublie');
             loadEphemeral();
@@ -1680,12 +3780,10 @@ async function ephemAddToFlow(idx) {
     const it = sorted[idx];
     if (!it) return;
     try {
-        const body = new URLSearchParams({
+        const data = await apiPost('api/flow', {
             action: 'add', url: it.url || '', title: it.title || '',
             channel: it.artist || '', type: 'audio', format: 'mp3'
         });
-        const resp = await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
-        const data = await resp.json();
         if (data.success) {
             showToast(data.duplicate ? 'Deja dans Mon Flow' : 'Ajoute a Mon Flow');
             loadEphemeral();
@@ -1899,14 +3997,7 @@ function renderStrategyHelp(strategy) {
     `;
 }
 
-async function statsApiCall(url) {
-    const resp = await fetch(url);
-    const ct = resp.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) {
-        throw new Error('Le serveur n\'expose pas /api/stats. Redemarre le serveur Node (Ctrl+C dans le terminal puis relance start.bat) pour charger la nouvelle route.');
-    }
-    return resp.json();
-}
+const statsApiCall = apiCall;
 
 function previewStrategy(strategy) {
     const help = document.getElementById('strategyHelp');
@@ -1950,11 +4041,7 @@ function reimportStats() {
         .catch(e => alert(e.message));
 }
 
-function fmtBytes(n) {
-    if (n < 1024) return n + ' o';
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' Ko';
-    return (n / 1024 / 1024).toFixed(2) + ' Mo';
-}
+const fmtBytes = Format.bytes;
 
 async function loadStorageInfo() {
     try {
@@ -1969,7 +4056,7 @@ async function loadStorageInfo() {
         help.innerHTML = renderStrategyHelp(data.strategy);
 
         const info = document.getElementById('storageInfo');
-        const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        const esc = escapeHtml;
         let html = `<div style="margin-bottom:8px;">
             <strong>${data.fileCount}</strong> fichier${data.fileCount > 1 ? 's' : ''}
             &middot; <strong>${data.totalEvents}</strong> evenement${data.totalEvents > 1 ? 's' : ''}
@@ -2016,12 +4103,10 @@ async function loadProfileStats() {
         if (statsState.view === 'month' || statsState.view === 'day') params.set('year', statsState.year);
         if (statsState.view === 'day') params.set('month', statsState.month);
 
-        const [statsResp, topResp] = await Promise.all([
-            fetch('api/stats?' + params.toString()),
-            fetch('api/stats?' + new URLSearchParams({ action: 'top_artists', view: statsState.view, year: statsState.year || 0, month: statsState.month || 0 }).toString())
+        const [data, topData] = await Promise.all([
+            apiCall('api/stats?' + params.toString()),
+            apiCall('api/stats?' + new URLSearchParams({ action: 'top_artists', view: statsState.view, year: statsState.year || 0, month: statsState.month || 0 }).toString())
         ]);
-        const data = await statsResp.json();
-        const topData = await topResp.json();
         if (!data.success) return;
 
         statsState.availableMonths = data.availableMonths || [];
@@ -2365,8 +4450,7 @@ async function onBucketClick(idx) {
         const params = new URLSearchParams({ action: 'details', view: v, key: b.key });
         if (statsState.year) params.set('year', statsState.year);
         if (statsState.month) params.set('month', statsState.month);
-        const resp = await fetch('api/stats?' + params.toString());
-        const data = await resp.json();
+        const data = await apiCall('api/stats?' + params.toString());
         if (!data.success) throw new Error(data.error || 'erreur');
         showBucketDetailsPanel(title + `  (${data.total} evenement${data.total > 1 ? 's' : ''})`, data.items, data.total);
     } catch (e) {
@@ -2391,7 +4475,7 @@ function showBucketDetailsPanel(title, items, totalCount) {
     if (!items.length) {
         listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Aucun evenement.</div>';
     } else {
-        const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        const esc = escapeHtml;
         const kindLabel = (k) => k === 'play' ? 'Lecture Mon Flow' : k === 'add' ? 'Ajout a Mon Flow' : 'Telechargement';
         let html = items.map(it => {
             const p = statsParseTs(it.ts);
@@ -2437,7 +4521,7 @@ function renderArtistChart(top) {
     const max = top[0][1];
     el.innerHTML = top.map(([name, count]) => {
         const pct = max ? (count / max * 100) : 0;
-        const safe = name.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        const safe = escapeHtml(name);
         return `<div class="chart-bar-h">
             <div class="bh-label" title="${safe}">${safe}</div>
             <div class="bh-track"><div class="bh-fill" style="width:${pct.toFixed(1)}%"></div></div>
@@ -2474,21 +4558,15 @@ function applyPrefs() {
 async function savePrefs() {
     if (!currentUser) return;
 
-    const prefType = document.querySelector('input[name="prefType"]:checked').value;
-    const body = 'action=save&username=' + encodeURIComponent(currentUser.username)
-        + '&pref_type=' + prefType
-        + '&pref_format_audio=' + document.getElementById('prefFormatAudio').value
-        + '&pref_format_video=' + document.getElementById('prefFormatVideo').value
-        + '&pref_quality_audio=' + document.getElementById('prefQualityAudio').value
-        + '&pref_quality_video=' + document.getElementById('prefQualityVideo').value
-        + '&pref_cover=' + (document.getElementById('prefCover').checked ? '1' : '0');
-
-    const resp = await fetch('api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
+    const data = await apiPost('api/profile', {
+        action: 'save', username: currentUser.username,
+        pref_type: document.querySelector('input[name="prefType"]:checked').value,
+        pref_format_audio: document.getElementById('prefFormatAudio').value,
+        pref_format_video: document.getElementById('prefFormatVideo').value,
+        pref_quality_audio: document.getElementById('prefQualityAudio').value,
+        pref_quality_video: document.getElementById('prefQualityVideo').value,
+        pref_cover: document.getElementById('prefCover').checked ? '1' : '0'
     });
-    const data = await resp.json();
     if (data.success) {
         currentUser = data.profile;
         applyPrefs();
@@ -2503,10 +4581,7 @@ async function logoutUser() {
     document.getElementById('loginView').style.display = 'block';
     document.getElementById('profileView').style.display = 'none';
     document.getElementById('welcomeBar').style.display = 'none';
-    await fetch('api/profile', { method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=logout'
-    });
+    await apiPost('api/profile', { action: 'logout' });
     loadProfilesList();
 }
 
@@ -2514,11 +4589,7 @@ async function logoutUser() {
 async function incrementDownloadCount() {
     if (!currentUser) return;
     currentUser.download_count = (currentUser.download_count || 0) + 1;
-    await fetch('api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=increment&username=' + encodeURIComponent(currentUser.username)
-    });
+    await apiPost('api/profile', { action: 'increment', username: currentUser.username });
 }
 
 // Enter dans le login
@@ -2554,8 +4625,7 @@ async function searchYouTube(loadMore) {
     const max = 20 * searchPage;
 
     try {
-        const resp = await fetch('api/search?q=' + encodeURIComponent(query) + '&max=' + max);
-        const data = await resp.json();
+        const data = await apiCall('api/search?q=' + encodeURIComponent(query) + '&max=' + max);
 
         if (!data.success || data.results.length === 0) {
             container.innerHTML = '<div class="search-loading">Aucun resultat.</div>';
@@ -2577,6 +4647,14 @@ async function searchYouTube(loadMore) {
             + '<button class="sfb-chip sfb-new" data-filter="new" onclick="filterSearchResults(\'new\')">&#10024; Nouveaux <span class="sfb-count" id="sfbCountNew">0</span></button>'
             + '<button class="sfb-chip sfb-dl" data-filter="dl" onclick="filterSearchResults(\'dl\')">&#10003; Telecharges <span class="sfb-count" id="sfbCountDl">0</span></button>'
             + '<button class="sfb-chip sfb-flow" data-filter="flow" onclick="filterSearchResults(\'flow\')">&#10003; Mon Flow <span class="sfb-count" id="sfbCountFlow">0</span></button>'
+            + '<span style="margin-left:8px;font-size:12px;color:var(--text-muted);">&middot; Duree :</span>'
+            + '<select id="durationFilter" onchange="filterSearchResults(document.querySelector(\'.sfb-chip.active\').dataset.filter)" class="sort-select" style="padding:5px 10px;font-size:12px;">'
+            + '<option value="all">Toutes</option>'
+            + '<option value="short">< 5 min</option>'
+            + '<option value="medium">5-10 min</option>'
+            + '<option value="long">10-30 min</option>'
+            + '<option value="xlong">&gt; 30 min</option>'
+            + '</select>'
             + '</div>';
         container.innerHTML = bar + '<div class="items-grid" id="searchGrid">' + data.results.map((r, i) => {
             var videoId = r.url.match(/[?&]v=([\w-]+)/);
@@ -2585,7 +4663,8 @@ async function searchYouTube(loadMore) {
             var thumbHtml = r.thumbnail
                 ? '<img src="' + r.thumbnail + '" alt="" onclick="previewYouTube(\'' + videoId + '\', \'' + safeTitle + '\')" style="cursor:pointer">'
                 : '<div class="no-thumb">&#9654;</div>';
-            return '<div class="item-card">'
+            const durSec = Format.parseClock(r.duration);
+            return '<div class="item-card" data-duration="' + durSec + '">'
             + '<button class="item-play-btn" onclick="previewYouTube(\'' + videoId + '\', \'' + safeTitle + '\')">&#9654;</button>'
             + thumbHtml
             + '<span class="badge ' + badgeClass + '">' + sqFmt + '</span>'
@@ -2605,9 +4684,310 @@ async function searchYouTube(loadMore) {
         + '</div>';
         // Marquer les videos deja telechargees
         sqMarkDownloaded();
+        renderSearchSuggestions(query);
+        rememberSearchQuery(query);
     } catch (err) {
         container.innerHTML = '<div class="search-loading">Erreur de recherche.</div>';
     }
+}
+
+const SEARCH_HISTORY_KEY = 'yt_search_history';
+const SEARCH_HISTORY_MAX = 100;
+const SEARCH_HISTORY_DISPLAY_KEY = 'yt_search_history_display';
+const SEARCH_HISTORY_DISPLAY_DEFAULT = 20;
+const SEARCH_HISTORY_DISPLAY_OPTIONS = [10, 20, 50, 100];
+
+function getSearchHistoryDisplayLimit() {
+    const raw = parseInt(localStorage.getItem(SEARCH_HISTORY_DISPLAY_KEY), 10);
+    return SEARCH_HISTORY_DISPLAY_OPTIONS.includes(raw) ? raw : SEARCH_HISTORY_DISPLAY_DEFAULT;
+}
+
+function setSearchHistoryDisplayLimit(n) {
+    const v = parseInt(n, 10);
+    if (!SEARCH_HISTORY_DISPLAY_OPTIONS.includes(v)) return;
+    localStorage.setItem(SEARCH_HISTORY_DISPLAY_KEY, String(v));
+    const profSel = document.getElementById('prefSearchHistoryLimit');
+    if (profSel && parseInt(profSel.value, 10) !== v) profSel.value = String(v);
+    const inSel = document.getElementById('shbDisplayLimit');
+    if (inSel && parseInt(inSel.value, 10) !== v) inSel.value = String(v);
+    renderInitialSearchHistory();
+}
+
+function rememberSearchQuery(q) {
+    if (!q) return;
+    try {
+        const list = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]');
+        const norm = q.toLowerCase().trim();
+        const filtered = list.filter(x => (x || '').toLowerCase() !== norm);
+        filtered.unshift(q);
+        localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(filtered.slice(0, SEARCH_HISTORY_MAX)));
+    } catch (e) {}
+}
+
+function getSearchHistory() {
+    try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]'); }
+    catch (e) { return []; }
+}
+
+function removeSearchHistoryItem(q) {
+    try {
+        const list = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]');
+        const filtered = list.filter(x => x !== q);
+        localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(filtered));
+    } catch (e) {}
+    renderInitialSearchHistory();
+}
+
+function clearSearchHistory() {
+    if (!confirm('Effacer toutes les recherches recentes ?')) return;
+    localStorage.removeItem(SEARCH_HISTORY_KEY);
+    renderInitialSearchHistory();
+}
+
+function renderInitialSearchHistory() {
+    const container = document.getElementById('searchResults');
+    if (!container) return;
+    const input = document.getElementById('searchInput');
+    if (input && input.value.trim()) return;
+
+    const sugg = document.getElementById('searchSuggestions');
+    if (sugg) sugg.style.display = 'none';
+
+    const fullHistory = getSearchHistory();
+    if (!fullHistory.length) {
+        container.innerHTML = '<div class="search-history-empty">'
+            + '<div class="she-icon">&#128269;</div>'
+            + '<div class="she-title">Aucune recherche recente</div>'
+            + '<div class="she-sub">Tape un mot-cle ci-dessus pour commencer.</div>'
+            + '</div>'
+            + '<div id="searchInitialEphemPlaceholder"></div>';
+        loadSearchEphem();
+        return;
+    }
+
+    const limit = getSearchHistoryDisplayLimit();
+    const history = fullHistory.slice(0, limit);
+    const optsHtml = SEARCH_HISTORY_DISPLAY_OPTIONS
+        .map(n => '<option value="' + n + '"' + (n === limit ? ' selected' : '') + '>' + n + '</option>')
+        .join('');
+    const countLabel = fullHistory.length > limit
+        ? history.length + ' / ' + fullHistory.length
+        : String(fullHistory.length);
+
+    container.innerHTML = '<div class="search-history-block">'
+        + '<div class="shb-header">'
+        + '<span class="shb-title"><span class="shb-header-icon">&#128336;</span> Recherches recentes <span class="shb-count">' + countLabel + '</span></span>'
+        + '<div class="shb-header-actions">'
+        + '<label class="shb-limit-label">Afficher <select id="shbDisplayLimit" class="shb-limit-select" onchange="setSearchHistoryDisplayLimit(this.value)">' + optsHtml + '</select></label>'
+        + '<button class="shb-clear" onclick="clearSearchHistory()" title="Tout effacer">&#10005; Tout effacer</button>'
+        + '</div>'
+        + '</div>'
+        + '<div class="shb-list">'
+        + history.map(q => {
+            const safe = escapeHtml(q);
+            const safeAttr = Dom.attr(q);
+            const safeJs = Dom.jsStr(q);
+            return '<div class="shb-item">'
+                + '<button class="shb-item-main" onclick="suggestSearch(\'' + safeJs + '\')" title="' + safeAttr + '">'
+                + '<span class="shb-icon">&#128269;</span>'
+                + '<span class="shb-label">' + safe + '</span>'
+                + '<span class="shb-arrow">&rarr;</span>'
+                + '</button>'
+                + '<button class="shb-item-remove" onclick="removeSearchHistoryItem(\'' + safeJs + '\')" title="Retirer de l\'historique">&times;</button>'
+                + '</div>';
+        }).join('')
+        + '</div></div>'
+        + '<div id="searchInitialEphemPlaceholder"></div>';
+    loadSearchEphem();
+}
+
+// === Ecoutes ephemeres affichees dans l'onglet Recherche ===
+let searchEphemCache = [];
+
+async function loadSearchEphem() {
+    const ph = document.getElementById('searchInitialEphemPlaceholder');
+    if (!ph) return;
+    try {
+        const data = await statsApiCall('api/stats?action=ephemeral');
+        if (!data || !data.success || !Array.isArray(data.items) || !data.items.length) {
+            searchEphemCache = [];
+            ph.innerHTML = '<div class="search-history-block" style="margin-top:14px;">'
+                + '<div class="shb-header">'
+                + '<span class="shb-title"><span class="shb-header-icon">&#127911;</span> Ecoutes ephemeres <span class="shb-count">0</span></span>'
+                + '</div>'
+                + '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">'
+                + 'Aucune ecoute pour le moment. Lance un titre via le bouton <strong style="color:#FF6D00;">&#127911; Ecouter</strong> sur un resultat de recherche '
+                + 'qui n\'est ni dans ta bibliotheque ni dans Mon Flow, et il apparaitra ici.'
+                + '</div>'
+                + '</div>';
+            return;
+        }
+        searchEphemCache = [...data.items].sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
+        renderSearchEphem();
+    } catch (e) {
+        ph.innerHTML = '';
+    }
+}
+
+function renderSearchEphem() {
+    const ph = document.getElementById('searchInitialEphemPlaceholder');
+    if (!ph) return;
+    if (!searchEphemCache.length) { ph.innerHTML = ''; return; }
+    const vidFromUrl = (u) => { const m = (u || '').match(/[?&]v=([^&]+)|youtu\.be\/([^?&]+)/); return m ? (m[1] || m[2]) : ''; };
+    const items = searchEphemCache.slice(0, 12);
+    ph.innerHTML = '<div class="search-history-block" style="margin-top:14px;">'
+        + '<div class="shb-header">'
+        + '<span class="shb-title"><span class="shb-header-icon">&#127911;</span> Ecoutes ephemeres <span class="shb-count">' + searchEphemCache.length + '</span></span>'
+        + '<div class="shb-header-actions">'
+        + '<button class="shb-clear" onclick="setStatsSubtab(\'ephemeral\'); switchTab(\'stats\');" title="Voir tout dans Stats">Voir tout</button>'
+        + '</div>'
+        + '</div>'
+        + '<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">Titres ecoutes en streaming, jamais ajoutes a Mon Flow ni telecharges.</div>'
+        + items.map((it, i) => {
+            const vid = vidFromUrl(it.url);
+            const thumb = vid ? 'https://i.ytimg.com/vi/' + vid + '/mqdefault.jpg' : '';
+            const safeTitle = escapeHtml(it.title || '(sans titre)');
+            const safeArtist = escapeHtml(it.artist || '');
+            return '<div class="ephem-row">'
+                + '<div class="ephem-thumb">' + (thumb ? '<img src="' + thumb + '" alt="" onerror="this.style.display=\'none\'">' : '&#127925;') + '</div>'
+                + '<div class="ephem-info">'
+                + '<div class="ephem-title" title="' + safeTitle + '">' + safeTitle + '</div>'
+                + '<div class="ephem-meta">' + (safeArtist ? safeArtist + ' &middot; ' : '') + '<strong>' + it.count + '</strong> ecoute' + (it.count > 1 ? 's' : '') + '</div>'
+                + '</div>'
+                + '<div class="ephem-actions">'
+                + '<button onclick="searchEphemPlay(' + i + ')" title="Re-ecouter" class="ephem-btn" style="background:var(--primary);color:#fff;">&#9654;</button>'
+                + '<button onclick="searchEphemAddToFlow(' + i + ')" title="Ajouter a Mon Flow" class="ephem-btn ephem-btn-flow">+ Flow</button>'
+                + '<button onclick="searchEphemDownload(' + i + ')" title="Telecharger" class="ephem-btn ephem-btn-dl">DL</button>'
+                + '<button onclick="searchEphemForget(' + i + ')" title="Oublier ce titre" class="ephem-btn ephem-btn-forget">&times;</button>'
+                + '</div>'
+                + '</div>';
+        }).join('')
+        + '</div>';
+}
+
+function searchEphemPlay(idx) {
+    const it = searchEphemCache[idx];
+    if (!it || !it.url) return;
+    if (!Array.isArray(lastSearchResults)) lastSearchResults = [];
+    lastSearchResults = [{
+        title: it.title || '',
+        channel: it.artist || '',
+        url: it.url,
+        thumbnail: ''
+    }];
+    searchPlayAudio(0);
+}
+
+async function searchEphemAddToFlow(idx) {
+    const it = searchEphemCache[idx];
+    if (!it || !it.url) return;
+    try {
+        const data = await apiPost('api/flow', {
+            action: 'add', url: it.url, title: it.title || '',
+            channel: it.artist || '', type: 'audio', format: 'mp3'
+        });
+        if (data.success) {
+            showToast(data.duplicate ? 'Deja dans Mon Flow' : 'Ajoute a Mon Flow');
+            // Une fois ajoute, le titre sort de la liste ephemere
+            loadSearchEphem();
+        }
+    } catch (e) { alert('Erreur : ' + e.message); }
+}
+
+function searchEphemDownload(idx) {
+    const it = searchEphemCache[idx];
+    if (!it || !it.url) return;
+    document.getElementById('url').value = it.url;
+    switchTab('download');
+    showToast('URL collee dans Telecharger');
+}
+
+async function searchEphemForget(idx) {
+    const it = searchEphemCache[idx];
+    if (!it) return;
+    try {
+        const data = await apiPost('api/stats?action=forget_ephemeral', { urls: JSON.stringify([it.url]) });
+        if (data && data.success) {
+            searchEphemCache.splice(idx, 1);
+            renderSearchEphem();
+            showToast('Titre oublie');
+        }
+    } catch (e) { alert('Erreur : ' + e.message); }
+}
+
+function suggestionVariants(q) {
+    const variants = [
+        { label: 'best of ' + q, suffix: 'best of', meta: 'compilation' },
+        { label: q + ' live', suffix: 'live', meta: 'concert' },
+        { label: q + ' feat', suffix: 'feat', meta: 'collabos' },
+        { label: q + ' 2024', suffix: '2024', meta: 'recent' },
+        { label: q + ' remix', suffix: 'remix', meta: 'remixes' },
+        { label: q + ' acoustic', suffix: 'acoustic', meta: 'version intime' }
+    ];
+    return variants.map(v => ({
+        query: v.suffix.startsWith('best') ? `best of ${q}` : `${q} ${v.suffix}`,
+        label: v.label,
+        meta: v.meta
+    }));
+}
+
+function renderSearchSuggestions(query) {
+    const panel = document.getElementById('searchSuggestions');
+    if (!panel) return;
+    const q = (query || '').trim();
+    if (!q) { panel.style.display = 'none'; return; }
+
+    const variants = suggestionVariants(q);
+    const recents = getSearchHistory().filter(x => (x || '').toLowerCase() !== q.toLowerCase()).slice(0, 6);
+    const flowMatches = (typeof flowTracks !== 'undefined' && flowTracks)
+        ? [...new Set(flowTracks
+            .map(t => {
+                const title = (t.title || '').trim();
+                const dash = title.search(/\s[-–—]\s/);
+                return dash > 0 ? title.substring(0, dash).trim() : (t.channel || '');
+            })
+            .filter(a => a && a.toLowerCase().includes(q.toLowerCase()) && a.toLowerCase() !== q.toLowerCase())
+          )].slice(0, 5)
+        : [];
+
+    const renderItem = (label, meta, query) =>
+        `<button class="ssp-item" onclick="suggestSearch('${Dom.jsStr(query)}')" title="${Dom.attr(query)}">
+            <span>${escapeHtml(label)}</span>
+            ${meta ? `<span class="ssp-meta">(${escapeHtml(meta)})</span>` : ''}
+            <span class="ssp-arrow">&rarr;</span>
+        </button>`;
+
+    let html = `
+        <div class="ssp-section">
+            <div class="ssp-title"><span class="ssp-icon">&#128269;</span> Recherches liees</div>
+            <div class="ssp-list">${variants.map(v => renderItem(v.label, v.meta, v.query)).join('')}</div>
+        </div>`;
+
+    if (flowMatches.length) {
+        html += `
+        <div class="ssp-section">
+            <div class="ssp-title"><span class="ssp-icon">&#127925;</span> Dans ton Mon Flow</div>
+            <div class="ssp-list">${flowMatches.map(a => renderItem(a, 'artiste connu', a)).join('')}</div>
+        </div>`;
+    }
+
+    if (recents.length) {
+        html += `
+        <div class="ssp-section">
+            <div class="ssp-title"><span class="ssp-icon">&#128336;</span> Tes recherches recentes</div>
+            <div class="ssp-list">${recents.map(r => renderItem(r, '', r)).join('')}</div>
+        </div>`;
+    }
+
+    panel.innerHTML = html;
+    panel.style.display = '';
+}
+
+function suggestSearch(q) {
+    const input = document.getElementById('searchInput');
+    if (input) input.value = q;
+    searchPage = 1;
+    searchYouTube();
 }
 
 function useSearchResult(url) {
@@ -2618,6 +4998,28 @@ function useSearchResult(url) {
 document.getElementById('searchInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); searchYouTube(); }
 });
+
+document.getElementById('searchInput').addEventListener('input', function(e) {
+    if (!e.target.value.trim()) {
+        searchQuery = '';
+        lastSearchResults = [];
+        renderInitialSearchHistory();
+    }
+});
+
+(function syncSearchHistoryLimitUI() {
+    const v = String(getSearchHistoryDisplayLimit());
+    const profSel = document.getElementById('prefSearchHistoryLimit');
+    if (profSel) profSel.value = v;
+})();
+(function syncCrossfadeUI() {
+    const v = getCrossfadeSeconds();
+    const sli = document.getElementById('prefCrossfadeSlider');
+    const lbl = document.getElementById('prefCrossfadeVal');
+    if (sli) sli.value = String(v);
+    if (lbl) lbl.textContent = v === 0 ? 'desactive' : (v + 's');
+})();
+renderInitialSearchHistory();
 
 // ========== SEARCH QUEUE (meme logique que l'extension) ==========
 let sqQueue = [];
@@ -2657,12 +5059,10 @@ async function sqMarkDownloaded() {
     let libItems = [];
     let flowItems = [];
     try {
-        const [libResp, flowResp] = await Promise.all([
-            fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' }),
-            fetch('api/flow?action=list')
+        const [libData, flowData] = await Promise.all([
+            apiPost('api/library', { action: 'list' }),
+            apiCall('api/flow?action=list')
         ]);
-        const libData = await libResp.json();
-        const flowData = await flowResp.json();
         if (libData.success) libItems = libData.items || [];
         if (flowData.success) flowItems = flowData.tracks || [];
     } catch (e) {}
@@ -2735,6 +5135,16 @@ function filterSearchResults(filter) {
     document.querySelectorAll('.sfb-chip').forEach(b => {
         b.classList.toggle('active', b.dataset.filter === filter);
     });
+    const durSel = document.getElementById('durationFilter');
+    const durFilter = durSel ? durSel.value : 'all';
+    const inDurRange = (sec) => {
+        if (durFilter === 'all') return true;
+        if (durFilter === 'short') return sec > 0 && sec < 300;
+        if (durFilter === 'medium') return sec >= 300 && sec < 600;
+        if (durFilter === 'long') return sec >= 600 && sec < 1800;
+        if (durFilter === 'xlong') return sec >= 1800;
+        return true;
+    };
     const cards = document.querySelectorAll('#searchGrid .item-card');
     let visible = 0;
     cards.forEach(c => {
@@ -2742,16 +5152,19 @@ function filterSearchResults(filter) {
         if (filter === 'new') show = c.dataset.isNew === '1';
         else if (filter === 'dl') show = c.classList.contains('sq-downloaded');
         else if (filter === 'flow') show = c.classList.contains('sq-in-flow');
+        if (show) show = inDurRange(parseInt(c.dataset.duration || '0', 10));
         c.style.display = show ? '' : 'none';
         if (show) visible++;
     });
     const countEl = document.getElementById('srCount');
     if (countEl) {
         const labels = { all: 'tous', new: 'nouveaux', dl: 'deja telecharges', flow: 'dans Mon Flow' };
+        const durLabels = { all: '', short: ' < 5min', medium: ' 5-10min', long: ' 10-30min', xlong: ' > 30min' };
         const label = labels[filter] || filter;
-        countEl.textContent = (filter === 'all')
+        const durSuffix = durLabels[durFilter] || '';
+        countEl.textContent = (filter === 'all' && durFilter === 'all')
             ? `${visible} resultat${visible > 1 ? 's' : ''}`
-            : `${visible} ${label} sur ${cards.length}`;
+            : `${visible} ${label}${durSuffix} sur ${cards.length}`;
     }
 }
 
@@ -2769,7 +5182,7 @@ async function searchPlayAudio(index) {
     mainAudio.src = '';
 
     searchPlayIdx = index;
-    playbackContext = 'search';
+    setPlayerSource('search');
 
     bar.classList.add('active');
     document.body.classList.add('player-open');
@@ -2786,8 +5199,7 @@ async function searchPlayAudio(index) {
     if (nextEl) nextEl.style.display = 'none';
 
     try {
-        const resp = await fetch('api/stream?url=' + encodeURIComponent(r.url) + '&type=audio');
-        const data = await resp.json();
+        const data = await apiCall('api/stream?url=' + encodeURIComponent(r.url) + '&type=audio');
         if (!data.success) {
             document.getElementById('playerArtist').textContent = 'Erreur : flux indisponible';
             return;
@@ -2824,15 +5236,10 @@ async function searchAddToFlow(index, btn) {
     btn.textContent = '...';
     btn.disabled = true;
     try {
-        const resp = await fetch('api/flow', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add&url=' + encodeURIComponent(r.url)
-                + '&title=' + encodeURIComponent(r.title || '')
-                + '&channel=' + encodeURIComponent(r.channel || '')
-                + '&thumbnail=' + encodeURIComponent(r.thumbnail || '')
-                + '&duration=' + encodeURIComponent(r.duration || '')
+        const data = await apiPost('api/flow', {
+            action: 'add', url: r.url, title: r.title || '', channel: r.channel || '',
+            thumbnail: r.thumbnail || '', duration: r.duration || ''
         });
-        const data = await resp.json();
         btn.textContent = data.duplicate ? 'Deja' : 'OK!';
         btn.style.background = data.duplicate ? '#666' : '#4CAF50';
         if (data.success) {
@@ -2862,8 +5269,7 @@ async function openAddBulkToFlow(items, onDone, defaultName) {
     if (!items || !items.length) return;
     let existing = [];
     try {
-        const resp = await fetch('api/flow?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/flow?action=list');
         if (data.success) existing = (data.playlists || []).map(p => p.name).filter(Boolean);
     } catch (e) {}
     aafPendingItems = items;
@@ -2990,11 +5396,7 @@ async function aafSubmit() {
             playlist = matched;
         } else {
             try {
-                const resp = await fetch('api/flow', {
-                    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'action=create_playlist&name=' + encodeURIComponent(name)
-                });
-                const data = await resp.json();
+                const data = await apiPost('api/flow', { action: 'create_playlist', name });
                 if (!data.success && !/existe/i.test(data.error || '')) {
                     alert('Erreur creation playlist : ' + (data.error || 'inconnue')); return;
                 }
@@ -3006,11 +5408,7 @@ async function aafSubmit() {
     const items = aafPendingItems.map(r => ({ ...r, playlist }));
 
     try {
-        const resp = await fetch('api/flow', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
-        });
-        const data = await resp.json();
+        const data = await apiPost('api/flow', { action: 'add_bulk', items: JSON.stringify(items) });
         aafClose();
         const dest = playlist ? `playlist "${playlist}"` : 'racine de Mon Flow';
         const parts = [];
@@ -3039,17 +5437,7 @@ function sqAdd(index, startNow) {
         jobId: null, _activeStart: 0, _skipped: false
     });
 
-    // Ajouter aussi sur le serveur pour sync avec l'extension
-    fetch('api/queue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=add&url=' + encodeURIComponent(r.url)
-            + '&title=' + encodeURIComponent(r.title)
-            + '&type=' + encodeURIComponent(type)
-            + '&format=' + encodeURIComponent(format)
-            + '&quality=' + encodeURIComponent(quality)
-            + '&source=web'
-    }).catch(() => {});
+    apiPost('api/queue', { action: 'add', url: r.url, title: r.title, type, format, quality, source: 'web' }).catch(() => {});
 
     sqRender();
     sqShowPanel();
@@ -3076,11 +5464,7 @@ function sqAddAll() {
 
     // Envoyer tout en une seule requete
     if (batch.length > 0) {
-        fetch('api/queue', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add_batch&source=web&items=' + encodeURIComponent(JSON.stringify(batch))
-        }).catch(() => {});
+        apiPost('api/queue', { action: 'add_batch', source: 'web', items: JSON.stringify(batch) }).catch(() => {});
     }
 
     sqRender();
@@ -3092,15 +5476,10 @@ function sqAddAll() {
 // sqSave met a jour le statut de chaque element sur le serveur
 function sqSave() {
     sqQueue.forEach(q => {
-        fetch('api/queue', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=update&url=' + encodeURIComponent(q.url)
-                + '&status=' + encodeURIComponent(q.status)
-                + '&percent=' + (q.percent || 0)
-                + '&message=' + encodeURIComponent(q.message || '')
-                + '&jobId=' + encodeURIComponent(q.jobId || '')
-                + '&title=' + encodeURIComponent(q.title || '')
+        apiPost('api/queue', {
+            action: 'update', url: q.url, status: q.status,
+            percent: q.percent || 0, message: q.message || '',
+            jobId: q.jobId || '', title: q.title || ''
         }).catch(() => {});
     });
 }
@@ -3113,8 +5492,7 @@ function sqLoad() {
 // Poll la queue serveur toutes les 3 secondes
 async function sqPollServer() {
     try {
-        const resp = await fetch('api/queue?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/queue?action=list');
         if (!data.success || !data.queue) return;
 
         const serverQueue = data.queue;
@@ -3203,11 +5581,7 @@ setInterval(sqPollServer, 3000);
 
 // Auto-fix couvertures manquantes toutes les 30 secondes
 setInterval(() => {
-    fetch('api/library', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=fix_covers'
-    }).catch(() => {});
+    apiPost('api/library', { action: 'fix_covers' }).catch(() => {});
 }, 30000);
 
 function sqLogSave() {}
@@ -3379,11 +5753,7 @@ function sqRemove(index) {
     if (!sqQueue[index] || sqQueue[index].status === 'active') return;
     const url = sqQueue[index].url;
     sqQueue.splice(index, 1);
-    fetch('api/queue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=remove&url=' + encodeURIComponent(url)
-    }).catch(() => {});
+    apiPost('api/queue', { action: 'remove', url }).catch(() => {});
     sqRender();
 }
 
@@ -3425,23 +5795,15 @@ function sqRetry(index) {
 
 function sqClearDone() {
     sqQueue = sqQueue.filter(q => q.status !== 'done' && q.status !== 'skipped' && q.status !== 'error');
-    fetch('api/queue', { method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=clear&mode=done'
-    }).catch(() => {});
+    apiPost('api/queue', { action: 'clear', mode: 'done' }).catch(() => {});
     sqRender();
 }
 
 function sqClearAll() {
-    sqQueue.forEach(q => {
-        if (q.status === 'active') q._skipped = true;
-    });
+    sqQueue.forEach(q => { if (q.status === 'active') q._skipped = true; });
     sqQueue = [];
     sqRunning = false;
-    fetch('api/queue', { method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=clear&mode=all'
-    }).catch(() => {});
+    apiPost('api/queue', { action: 'clear', mode: 'all' }).catch(() => {});
     sqRender();
 }
 
@@ -3457,15 +5819,7 @@ function sqAddLog(type, title, detail) {
     });
     if (sqLog.length > 100) sqLog.pop();
     sqRenderLog();
-    // Envoyer au serveur
-    fetch('api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=add&type=' + encodeURIComponent(type)
-            + '&title=' + encodeURIComponent(title)
-            + '&detail=' + encodeURIComponent(detail)
-            + '&source=web'
-    }).catch(() => {});
+    apiPost('api/notifications', { action: 'add', type, title, detail, source: 'web' }).catch(() => {});
 }
 
 function sqSetLogTab(tab) {
@@ -3556,49 +5910,31 @@ function sqMarkRead(id) {
     const item = sqLog.find(n => n.id === id);
     if (item) item.read = true;
     sqRenderLog();
-    fetch('api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=markRead&id=' + encodeURIComponent(id)
-    }).catch(() => {});
+    apiPost('api/notifications', { action: 'markRead', id }).catch(() => {});
 }
 
 function sqMarkUnread(id) {
     const item = sqLog.find(n => n.id === id);
     if (item) item.read = false;
     sqRenderLog();
-    fetch('api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=markUnread&id=' + encodeURIComponent(id)
-    }).catch(() => {});
+    apiPost('api/notifications', { action: 'markUnread', id }).catch(() => {});
 }
 
 function sqMarkAllRead() {
     sqLog.forEach(n => { n.read = true; });
     sqRenderLog();
-    fetch('api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=markAllRead'
-    }).catch(() => {});
+    apiPost('api/notifications', { action: 'markAllRead' }).catch(() => {});
 }
 
 function sqClearLog() {
     sqLog = [];
     sqRenderLog();
-    fetch('api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=clear'
-    }).catch(() => {});
+    apiPost('api/notifications', { action: 'clear' }).catch(() => {});
 }
 
-// Poll notifications serveur toutes les 3 secondes
 async function sqPollNotifications() {
     try {
-        const resp = await fetch('api/notifications?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/notifications?action=list');
         if (!data.success || !data.notifications) return;
         sqLog = data.notifications.map((n, i) => ({
             id: n.id || ('legacy_' + (n.timestamp || i) + '_' + i),
@@ -3623,8 +5959,7 @@ async function sqProcess() {
 
             // Verifier l'etat actuel sur le serveur avant de traiter
             try {
-                const checkResp = await fetch('api/queue?action=list');
-                const checkData = await checkResp.json();
+                const checkData = await apiCall('api/queue?action=list');
                 if (checkData.success && checkData.queue) {
                     const serverItem = checkData.queue.find(q => q.url === item.url);
                     if (!serverItem) {
@@ -3658,17 +5993,12 @@ async function sqProcess() {
                     // Si dossier defini, deplacer l'element existant dedans
                     if (item.folder) {
                         try {
-                            const listResp = await fetch('api/library?action=list');
-                            const listData = await listResp.json();
+                            const listData = await apiCall('api/library?action=list');
                             if (listData.items) {
                                 const videoId = item.url.match(/[?&]v=([^&]+)/)?.[1] || '';
                                 const existing = listData.items.find(i => i.url && videoId && i.url.includes(videoId) && (i.format || '') === item.format);
                                 if (existing && existing.folder !== item.folder) {
-                                    await fetch('api/library', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                        body: 'action=move_item&item_id=' + encodeURIComponent(existing.id) + '&folder_id=' + encodeURIComponent(item.folder)
-                                    });
+                                    await apiPost('api/library', { action: 'move_item', item_id: existing.id, folder_id: item.folder });
                                     sqAddLog('skip', item.title, 'Deplace dans le dossier');
                                 } else {
                                     sqAddLog('skip', item.title, 'Deja dans la bibliotheque');
@@ -3690,26 +6020,13 @@ async function sqProcess() {
                 // Info video
                 item.message = 'Recuperation des infos...';
                 sqRender();
-                const infoResp = await fetch('api/info', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'url=' + encodeURIComponent(item.url)
-                });
-                const info = await infoResp.json();
+                const info = await apiPost('api/info', { url: item.url });
                 if (info.success) item.title = info.title;
                 sqRender();
 
-                // Lancer le telechargement
                 item.message = 'Lancement...';
                 sqRender();
-                const dlResp = await fetch('api/download', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'url=' + encodeURIComponent(item.url)
-                        + '&type=' + item.type + '&format=' + item.format
-                        + '&quality=' + item.quality + '&cover=1'
-                });
-                const dlData = await dlResp.json();
+                const dlData = await apiPost('api/download', { url: item.url, type: item.type, format: item.format, quality: item.quality, cover: '1' });
 
                 if (!dlData.success) {
                     item.status = 'error';
@@ -3748,8 +6065,7 @@ async function sqProcess() {
                             return;
                         }
                         try {
-                            const resp = await fetch('api/progress?id=' + dlData.jobId);
-                            const data = await resp.json();
+                            const data = await apiCall('api/progress?id=' + dlData.jobId);
                             pollErrors = 0;
 
                             const curMsg = data.message || '';
@@ -3764,27 +6080,15 @@ async function sqProcess() {
                                 item.percent = 100;
                                 item.message = 'Termine';
 
-                                // Ajouter a la bibliotheque
-                                await fetch('api/library', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                    body: 'action=add_item&file=' + encodeURIComponent(data.file)
-                                        + '&title=' + encodeURIComponent(item.title)
-                                        + '&type=' + item.type + '&format=' + item.format
-                                        + '&thumbnail=' + encodeURIComponent(item.thumbnail || '')
-                                        + '&channel=' + encodeURIComponent(item.channel || '')
-                                        + '&duration=' + encodeURIComponent(item.duration || '')
-                                        + '&cover=' + encodeURIComponent(data.cover || '')
-                                        + '&folder=' + encodeURIComponent(item.folder || '')
-                                        + '&url=' + encodeURIComponent(item.url)
+                                await apiPost('api/library', {
+                                    action: 'add_item', file: data.file, title: item.title,
+                                    type: item.type, format: item.format,
+                                    thumbnail: item.thumbnail || '', channel: item.channel || '',
+                                    duration: item.duration || '', cover: data.cover || '',
+                                    folder: item.folder || '', url: item.url
                                 });
-                                // Si pas de cover, reparer automatiquement
                                 if (!data.cover) {
-                                    fetch('api/library', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                        body: 'action=fix_covers'
-                                    }).catch(() => {});
+                                    apiPost('api/library', { action: 'fix_covers' }).catch(() => {});
                                 }
                                 sqAddLog('success', item.title, item.format.toUpperCase());
                                 notifyDone(item.title);
@@ -3843,8 +6147,7 @@ async function sqResume() {
         if (q.status === 'active' && q.jobId) {
             // Verifier si le job tourne encore
             try {
-                const resp = await fetch('api/progress?id=' + q.jobId);
-                const data = await resp.json();
+                const data = await apiCall('api/progress?id=' + q.jobId);
                 if (data.status === 'done') {
                     q.status = 'done'; q.percent = 100; q.message = 'Termine';
                     changed = true;
@@ -3884,8 +6187,7 @@ function sqResumePolling(item) {
             return;
         }
         try {
-            const resp = await fetch('api/progress?id=' + item.jobId);
-            const data = await resp.json();
+            const data = await apiCall('api/progress?id=' + item.jobId);
             pollErrors = 0;
             if (data.percent !== item.percent || data.message !== item.message) lastActivity = Date.now();
 
@@ -3953,12 +6255,7 @@ async function checkPlaylist(url) {
     progressBar.style.width = '5%';
 
     try {
-        const resp = await fetch('api/playlist', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'url=' + encodeURIComponent(url)
-        });
-        const data = await resp.json();
+        const data = await apiPost('api/playlist', { url });
 
         if (data.success && data.videos.length > 1) {
             progressZone.classList.remove('active');
@@ -4037,25 +6334,21 @@ function resumePolling(idx) {
     if (!item || !item.jobId) return;
     const interval = setInterval(async () => {
         try {
-            const resp = await fetch('api/progress?id=' + item.jobId);
-            const data = await resp.json();
+            const data = await apiCall('api/progress?id=' + item.jobId);
             if (data.status === 'done') {
                 clearInterval(interval);
                 item.status = 'done';
                 notifyDone(item.title);
                 addHistory(item.title, 'success', item.format, item.type, item.url, item.info);
-                await fetch('api/library', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'action=add_item&file=' + encodeURIComponent(data.file)
-                        + '&title=' + encodeURIComponent((item.info && item.info.title) || item.title)
-                        + '&type=' + item.type + '&format=' + item.format
-                        + '&folder=' + encodeURIComponent(item.folder || '')
-                        + '&thumbnail=' + encodeURIComponent((item.info && item.info.thumbnail) || '')
-                        + '&channel=' + encodeURIComponent((item.info && item.info.channel) || '')
-                        + '&duration=' + encodeURIComponent((item.info && item.info.duration) || '')
-                        + '&cover=' + encodeURIComponent(data.cover || '')
-                        + '&url=' + encodeURIComponent(item.url)
+                await apiPost('api/library', {
+                    action: 'add_item', file: data.file,
+                    title: (item.info && item.info.title) || item.title,
+                    type: item.type, format: item.format,
+                    folder: item.folder || '',
+                    thumbnail: (item.info && item.info.thumbnail) || '',
+                    channel: (item.info && item.info.channel) || '',
+                    duration: (item.info && item.info.duration) || '',
+                    cover: data.cover || '', url: item.url
                 });
                 incrementDownloadCount();
                 loadSystemInfo();
@@ -4089,11 +6382,7 @@ function addToQueue() {
 
     // Recuperer le titre en arriere-plan
     const idx = downloadQueue.length - 1;
-    fetch('api/info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'url=' + encodeURIComponent(url)
-    }).then(r => r.json()).then(info => {
+    apiPost('api/info', { url }).then(info => {
         if (info.success && downloadQueue[idx]) {
             downloadQueue[idx].title = info.title;
             downloadQueue[idx].info = info;
@@ -4105,37 +6394,54 @@ function addToQueue() {
 }
 
 function removeFromQueue(idx) {
-    if (downloadQueue[idx] && downloadQueue[idx].status === 'waiting') {
-        downloadQueue.splice(idx, 1);
-        renderQueue();
-        saveQueue();
-    }
+    const item = downloadQueue[idx];
+    if (!item) return;
+    if (item.status === 'active' && !confirm('Ce telechargement est en cours. Le retirer de la liste (le fichier en cours continuera cote serveur) ?')) return;
+    downloadQueue.splice(idx, 1);
+    renderQueue();
+    saveQueue();
 }
 
 function renderQueue() {
     const section = document.getElementById('queueSection');
     const list = document.getElementById('queueList');
-    const waiting = downloadQueue.filter(q => q.status !== 'done');
 
-    if (waiting.length === 0) {
+    if (downloadQueue.length === 0) {
         section.style.display = 'none';
         return;
     }
 
     section.style.display = 'block';
-    section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    document.getElementById('queueCount').textContent = waiting.length;
+    document.getElementById('queueCount').textContent = downloadQueue.length;
 
     list.innerHTML = downloadQueue.map((q, i) => {
-        if (q.status === 'done') return '';
-        const statusClass = q.status === 'active' ? 'active' : (q.status === 'done' ? 'done' : '');
-        const statusText = q.status === 'active' ? 'En cours...' : (q.status === 'error' ? 'Erreur' : 'En attente');
+        const statusClass = q.status === 'active' ? 'active' : (q.status === 'done' ? 'done' : (q.status === 'error' ? 'error' : ''));
+        const statusText = q.status === 'active' ? 'En cours...'
+            : q.status === 'error' ? 'Erreur'
+            : q.status === 'done' ? 'Termine'
+            : 'En attente';
         return '<div class="queue-item">'
             + '<span class="qi-title">' + q.title + '</span>'
             + '<span class="qi-status ' + statusClass + '">' + statusText + '</span>'
-            + (q.status === 'waiting' ? '<button class="qi-remove" onclick="removeFromQueue(' + i + ')">&times;</button>' : '')
+            + '<button class="qi-remove" onclick="removeFromQueue(' + i + ')" title="Retirer">&times;</button>'
             + '</div>';
     }).join('');
+}
+
+function clearQueueAll() {
+    if (!downloadQueue.length) return;
+    if (!confirm('Vider toute la file d\'attente ? Les telechargements en cours seront marques comme retires de la liste mais le fichier en cours continuera cote serveur.')) return;
+    downloadQueue = [];
+    saveQueue();
+    renderQueue();
+}
+
+function clearQueueDone() {
+    const before = downloadQueue.length;
+    downloadQueue = downloadQueue.filter(q => q.status !== 'done' && q.status !== 'error');
+    if (downloadQueue.length === before) return;
+    saveQueue();
+    renderQueue();
 }
 
 async function processQueue() {
@@ -4153,12 +6459,7 @@ async function processQueue() {
         try {
             // Recuperer info si pas deja fait
             if (!item.info) {
-                const infoResp = await fetch('api/info', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'url=' + encodeURIComponent(item.url)
-                });
-                item.info = await infoResp.json();
+                item.info = await apiPost('api/info', { url: item.url });
                 if (!item.info.success) { item.status = 'error'; renderQueue(); saveQueue(); continue; }
                 item.title = item.info.title;
                 renderQueue();
@@ -4188,12 +6489,7 @@ async function processQueue() {
 }
 
 function queueDownload(item, resolve) {
-    fetch('api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'url=' + encodeURIComponent(item.url) + '&type=' + item.type + '&format=' + item.format
-            + '&quality=' + item.quality + '&cover=' + item.saveCover
-    }).then(r => r.json()).then(dlData => {
+    apiPost('api/download', { url: item.url, type: item.type, format: item.format, quality: item.quality, cover: item.saveCover }).then(dlData => {
         if (!dlData.success) { item.status = 'error'; renderQueue(); saveQueue(); resolve(); return; }
 
         item.jobId = dlData.jobId;
@@ -4201,25 +6497,17 @@ function queueDownload(item, resolve) {
 
         const interval = setInterval(async () => {
             try {
-                const resp = await fetch('api/progress?id=' + dlData.jobId);
-                const data = await resp.json();
+                const data = await apiCall('api/progress?id=' + dlData.jobId);
                 if (data.status === 'done') {
                     clearInterval(interval);
                     item.status = 'done';
                     notifyDone(item.title);
                     addHistory(item.title, 'success', item.format, item.type, item.url, item.info);
-                    await fetch('api/library', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: 'action=add_item&file=' + encodeURIComponent(data.file)
-                            + '&title=' + encodeURIComponent(item.info.title)
-                            + '&type=' + item.type + '&format=' + item.format
-                            + '&folder=' + encodeURIComponent(item.folder)
-                            + '&thumbnail=' + encodeURIComponent(item.info.thumbnail)
-                            + '&channel=' + encodeURIComponent(item.info.channel)
-                            + '&duration=' + encodeURIComponent(item.info.duration)
-                            + '&cover=' + encodeURIComponent(data.cover || '')
-                            + '&url=' + encodeURIComponent(item.url)
+                    await apiPost('api/library', {
+                        action: 'add_item', file: data.file, title: item.info.title,
+                        type: item.type, format: item.format, folder: item.folder,
+                        thumbnail: item.info.thumbnail, channel: item.info.channel,
+                        duration: item.info.duration, cover: data.cover || '', url: item.url
                     });
                     incrementDownloadCount();
                     loadSystemInfo();
@@ -4242,17 +6530,11 @@ function queueDownload(item, resolve) {
 // ========== HISTORY ==========
 async function addHistory(title, status, format, type, url, info) {
     const extra = info || {};
-    await fetch('api/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=add&title=' + encodeURIComponent(title) + '&status=' + status
-            + '&format=' + format + '&type=' + type + '&url=' + encodeURIComponent(url || '')
-            + '&channel=' + encodeURIComponent(extra.channel || '')
-            + '&views=' + encodeURIComponent(extra.views_display || '')
-            + '&year=' + encodeURIComponent(extra.year || '')
-            + '&likes=' + encodeURIComponent(extra.likes || '0')
-            + '&dislikes=' + encodeURIComponent(extra.dislikes || '0')
-            + '&thumbnail=' + encodeURIComponent(extra.thumbnail || '')
+    apiPost('api/history', {
+        action: 'add', title, status, format, type, url: url || '',
+        channel: extra.channel || '', views: extra.views_display || '',
+        year: extra.year || '', likes: extra.likes || '0', dislikes: extra.dislikes || '0',
+        thumbnail: extra.thumbnail || ''
     }).catch(() => {});
 }
 
@@ -4267,8 +6549,7 @@ let historyCache = [];
 
 async function loadHistory() {
     try {
-        const resp = await fetch('api/history?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/history?action=list');
         if (!data.success) return;
 
         historyCache = data.history || [];
@@ -4286,8 +6567,7 @@ async function loadHistory() {
         // Charger la bibliotheque pour detecter les doublons
         let libItems = [];
         try {
-            const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
-            const libData = await libResp.json();
+            const libData = await apiPost('api/library', { action: 'list' });
             if (libData.success) libItems = libData.items || [];
         } catch (e) {}
 
@@ -4468,8 +6748,7 @@ async function historyRedownload() {
     // Verifier les doublons
     let libItems = [];
     try {
-        const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
-        const libData = await libResp.json();
+        const libData = await apiPost('api/library', { action: 'list' });
         if (libData.success) libItems = libData.items || [];
     } catch (e) {}
 
@@ -4545,12 +6824,7 @@ async function historyRedownload() {
             const format = dlFormat || h.format || 'mp3';
             const quality = type === 'audio' ? '0' : 'best';
 
-            const dlResp = await fetch('api/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'url=' + encodeURIComponent(h.url) + '&type=' + type + '&format=' + format + '&quality=' + quality + '&cover=1'
-            });
-            const dlData = await dlResp.json();
+            const dlData = await apiPost('api/download', { url: h.url, type, format, quality, cover: '1' });
 
             if (dlData.success) {
                 logTech('INFO', 'Re-telechargement lance', { title: h.title, jobId: dlData.jobId });
@@ -4559,8 +6833,7 @@ async function historyRedownload() {
                 await new Promise((resolve) => {
                     const poll = setInterval(async () => {
                         try {
-                            const pResp = await fetch('api/progress?id=' + dlData.jobId);
-                            const pData = await pResp.json();
+                            const pData = await apiCall('api/progress?id=' + dlData.jobId);
 
                             if (pData.status === 'done') {
                                 clearInterval(poll);
@@ -4574,16 +6847,11 @@ async function historyRedownload() {
                                 const histItem = document.querySelector('.history-item[data-idx="' + selected[i]._histIdx + '"] .hi-icon');
                                 if (histItem) { histItem.innerHTML = '&#10003;'; histItem.className = 'hi-icon success'; }
                                 // Ajouter a la bibliotheque
-                                fetch('api/library', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                    body: 'action=add_item&file=' + encodeURIComponent(pData.file || '')
-                                        + '&title=' + encodeURIComponent(h.title || '')
-                                        + '&type=' + (h.type || 'audio') + '&format=' + (h.format || 'mp3')
-                                        + '&folder=' + '&thumbnail='
-                                        + '&channel=' + encodeURIComponent(h.channel || '')
-                                        + '&duration=&cover=' + encodeURIComponent(pData.cover || '')
-                                        + '&url=' + encodeURIComponent(h.url || '')
+                                apiPost('api/library', {
+                                    action: 'add_item', file: pData.file || '', title: h.title || '',
+                                    type: h.type || 'audio', format: h.format || 'mp3',
+                                    folder: '', thumbnail: '', channel: h.channel || '',
+                                    duration: '', cover: pData.cover || '', url: h.url || ''
                                 }).catch(() => {});
                                 resolve();
                             } else if (pData.status === 'error') {
@@ -4660,21 +6928,14 @@ function historyImport(event) {
 
             for (const h of imported) {
                 if (h.url && existingUrls.has(h.url)) { skipped++; continue; }
-                await fetch('api/history', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'action=add&title=' + encodeURIComponent(h.title || '')
-                        + '&status=' + encodeURIComponent(h.status || 'success')
-                        + '&format=' + encodeURIComponent(h.format || '')
-                        + '&type=' + encodeURIComponent(h.type || '')
-                        + '&url=' + encodeURIComponent(h.url || '')
-                        + '&channel=' + encodeURIComponent(h.channel || '')
-                        + '&views=' + encodeURIComponent(h.views || '')
-                        + '&year=' + encodeURIComponent(h.year || '')
-                        + '&likes=' + encodeURIComponent(h.likes || '0')
-                        + '&dislikes=' + encodeURIComponent(h.dislikes || '0')
-                        + '&thumbnail=' + encodeURIComponent(h.thumbnail || '')
-                        + '&source=' + encodeURIComponent(h.source === 'local' ? sourceName : (h.source || sourceName))
+                await apiPost('api/history', {
+                    action: 'add',
+                    title: h.title || '', status: h.status || 'success',
+                    format: h.format || '', type: h.type || '', url: h.url || '',
+                    channel: h.channel || '', views: h.views || '', year: h.year || '',
+                    likes: h.likes || '0', dislikes: h.dislikes || '0',
+                    thumbnail: h.thumbnail || '',
+                    source: h.source === 'local' ? sourceName : (h.source || sourceName)
                 });
                 if (h.url) existingUrls.add(h.url);
                 added++;
@@ -4716,7 +6977,7 @@ async function streamFromHistory(idx, type) {
     playerDiv.style.display = 'block';
     titleEl.textContent = h.title || 'Chargement...';
     currentStreamIdx = idx;
-    playbackContext = 'history';
+    setPlayerSource('history');
 
     // Thumbnail
     let thumb = h.thumbnail || '';
@@ -4734,8 +6995,7 @@ async function streamFromHistory(idx, type) {
     // Verifier si le fichier est present localement
     if (historyLibCache.length === 0) {
         try {
-            const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
-            const libData = await libResp.json();
+            const libData = await apiPost('api/library', { action: 'list' });
             if (libData.success) historyLibCache = libData.items || [];
         } catch (e) {}
     }
@@ -4783,8 +7043,7 @@ async function streamFromHistory(idx, type) {
             preloadedNext = null;
             logTech('INFO', 'Stream pre-charge utilise', { title: h.title });
         } else {
-            const resp = await fetch('api/stream?url=' + encodeURIComponent(h.url) + '&type=' + type);
-            const data = await resp.json();
+            const data = await apiCall('api/stream?url=' + encodeURIComponent(h.url) + '&type=' + type);
             if (!data.success) {
                 metaEl.textContent = 'Erreur : ' + (data.error || 'Flux indisponible');
                 return;
@@ -4847,8 +7106,7 @@ function preloadNext(currentIdx, type) {
     const h = historyCache[nextIdx];
     logTech('INFO', 'Pre-chargement du suivant', { title: h.title });
 
-    fetch('api/stream?url=' + encodeURIComponent(h.url) + '&type=' + type)
-        .then(r => r.json())
+    apiCall('api/stream?url=' + encodeURIComponent(h.url) + '&type=' + type)
         .then(data => {
             if (data.success && currentStreamIdx === currentIdx) {
                 preloadedNext = { idx: nextIdx, type, streamUrl: data.streamUrl };
@@ -4876,7 +7134,7 @@ function stopStream() {
     document.querySelectorAll('.history-item').forEach(el => el.classList.remove('hi-playing'));
     currentStreamIdx = -1;
     preloadedNext = null;
-    playbackContext = 'library';
+    setPlayerSource('library');
 }
 
 async function addToFlowFromHistory(idx, btn) {
@@ -4885,19 +7143,12 @@ async function addToFlowFromHistory(idx, btn) {
     btn.textContent = '...';
     btn.disabled = true;
     try {
-        const resp = await fetch('api/flow', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add&url=' + encodeURIComponent(h.url)
-                + '&title=' + encodeURIComponent(h.title || '')
-                + '&channel=' + encodeURIComponent(h.channel || '')
-                + '&thumbnail=' + encodeURIComponent(h.thumbnail || '')
-                + '&views=' + encodeURIComponent(h.views || '')
-                + '&year=' + encodeURIComponent(h.year || '')
-                + '&format=' + encodeURIComponent(h.format || '')
-                + '&type=' + encodeURIComponent(h.type || 'audio')
+        const data = await apiPost('api/flow', {
+            action: 'add', url: h.url,
+            title: h.title || '', channel: h.channel || '',
+            thumbnail: h.thumbnail || '', views: h.views || '',
+            year: h.year || '', format: h.format || '', type: h.type || 'audio'
         });
-        const data = await resp.json();
         if (data.duplicate) {
             btn.textContent = 'Deja dans Flow';
             btn.style.background = 'var(--text-muted)';
@@ -4923,51 +7174,64 @@ let flowPreloaded = null;
 
 let flowLibItems = [];
 
+const FLOW_TOP_COVER_KEY = 'yt_flow_top_cover_count';
+const FLOW_TOP_COVER_DEFAULT = 3;
+const FLOW_TOP_COVER_OPTIONS = [3, 5, 10, 20];
+
+function getFlowTopCoverLimit() {
+    const raw = parseInt(localStorage.getItem(FLOW_TOP_COVER_KEY), 10);
+    return FLOW_TOP_COVER_OPTIONS.includes(raw) ? raw : FLOW_TOP_COVER_DEFAULT;
+}
+
+function setFlowTopCoverLimit(n) {
+    const v = parseInt(n, 10);
+    if (!FLOW_TOP_COVER_OPTIONS.includes(v)) return;
+    localStorage.setItem(FLOW_TOP_COVER_KEY, String(v));
+    renderFlow();
+}
+
 async function loadFlow() {
     try {
-        const resp = await fetch('api/flow?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/flow?action=list');
         if (!data.success) return;
         flowTracks = data.tracks || [];
         flowPlaylists = data.playlists || [];
 
-        // Charger la biblio une seule fois pour detecter les fichiers deja telecharges
         try {
-            const libResp = await fetch('api/library', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=list' });
-            const libData = await libResp.json();
+            const libData = await apiPost('api/library', { action: 'list' });
             if (libData.success) flowLibItems = libData.items || [];
         } catch (e) {}
 
-        renderFlow();
+        // Appliquer le tri actuel (par defaut : plus ecoutes en premier)
+        if (document.getElementById('flowSortBy')) {
+            sortFlow(); // sortFlow appelle deja renderFlow
+        } else {
+            renderFlow();
+        }
     } catch (e) {}
 }
 
-function flowParseDurationSec(s) {
-    if (!s) return 0;
-    const str = String(s).trim();
-    const m = str.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
-    if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
-    const sec = parseInt(str, 10);
-    return isNaN(sec) ? 0 : sec;
-}
+const flowParseDurationSec = Format.parseClock;
 
 function flowFormatTotalDuration(tracks) {
     let total = 0, known = 0;
     tracks.forEach(t => {
-        const s = flowParseDurationSec(t.duration);
+        const s = Format.parseClock(t.duration);
         if (s > 0) { total += s; known++; }
     });
     if (!known) return '';
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    let txt = '';
-    if (h > 0) txt = `${h}h ${m.toString().padStart(2, '0')}min`;
-    else if (m > 0) txt = `${m}min ${s.toString().padStart(2, '0')}s`;
-    else txt = `${s}s`;
+    const txt = Format.durationShort(total);
+    let daysHtml = '';
+    if (total >= 86400) {
+        const days = Math.floor(total / 86400);
+        const remH = Math.floor((total % 86400) / 3600);
+        const dLabel = days > 1 ? 'jours' : 'jour';
+        const txtDays = remH > 0 ? `${days} ${dLabel} ${remH}h` : `${days} ${dLabel}`;
+        daysHtml = `<span class="ftc-duration-days">&#8776; ${txtDays}</span>`;
+    }
     const missing = tracks.length - known;
     const note = missing > 0 ? `<span class="ftc-missing">${missing} sans duree</span>` : '';
-    return `<span class="ftc-duration">&#9201; ~${txt}</span>${note}`;
+    return `<span class="ftc-duration">&#9201; ~${txt}</span>${daysHtml}${note}`;
 }
 
 function renderFlow() {
@@ -4980,10 +7244,54 @@ function renderFlow() {
     const plNames = [...new Set(flowTracks.map(t => t.playlist).filter(Boolean))];
     const likedCountF = flowTracks.filter(t => t.liked).length;
     const playedCountF = flowTracks.filter(t => (t.playCount || 0) > 0).length;
+    // Compteurs des fenetres de temps
+    const _now = Date.now();
+    const _dayMs = 86400000;
+    const flowInWindow = (track, days) => {
+        if (!track.lastPlayed) return false;
+        const ts = Date.parse(track.lastPlayed);
+        if (isNaN(ts)) return false;
+        return (_now - ts) <= days * _dayMs;
+    };
+    const todayCountF = flowTracks.filter(t => flowInWindow(t, 1)).length;
+    const weekCountF = flowTracks.filter(t => flowInWindow(t, 7)).length;
+    const monthCountF = flowTracks.filter(t => flowInWindow(t, 30)).length;
+
     let plHtml = '<span class="flow-pl-chip' + (!flowCurrentPlaylist && !flowViewMode ? ' active' : '') + '" onclick="flowFilterPlaylist(\'\', this)" ondragover="event.preventDefault()" ondrop="flowDropOnPlaylist(event, \'\')">Tout (' + flowTracks.length + ')</span>';
     // Vues rapides
     if (playedCountF > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'top' ? ' active' : '') + '" onclick="flowSetViewMode(\'top\', this)" title="Top 20 les plus ecoutes">&#11088; Plus ecoutes</span>';
     if (flowTracks.length > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'recent' ? ' active' : '') + '" onclick="flowSetViewMode(\'recent\', this)" title="20 derniers ajouts">&#128336; Recemment ajoutes</span>';
+    if (todayCountF > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'today' ? ' active' : '') + '" onclick="flowSetViewMode(\'today\', this)" title="Ecoutes aujourd\'hui">&#9728; Aujourd\'hui (' + todayCountF + ')</span>';
+    if (weekCountF > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'week' ? ' active' : '') + '" onclick="flowSetViewMode(\'week\', this)" title="Ecoutes ces 7 derniers jours">&#128197; Cette semaine (' + weekCountF + ')</span>';
+    if (monthCountF > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'month' ? ' active' : '') + '" onclick="flowSetViewMode(\'month\', this)" title="Ecoutes ces 30 derniers jours">&#128467; Ce mois (' + monthCountF + ')</span>';
+
+    // === Smart playlists auto-calculees ===
+    const inDays = (track, days) => {
+        if (!track.lastPlayed) return false;
+        const ts = Date.parse(track.lastPlayed);
+        if (isNaN(ts)) return false;
+        return (_now - ts) <= days * _dayMs;
+    };
+    const addedInDays = (track, days) => {
+        if (!track.addedAt) return false;
+        const ts = Date.parse(track.addedAt);
+        if (isNaN(ts)) return false;
+        return (_now - ts) <= days * _dayMs;
+    };
+    const olderThanDays = (track, days) => {
+        if (!track.lastPlayed) return false;
+        const ts = Date.parse(track.lastPlayed);
+        if (isNaN(ts)) return false;
+        return (_now - ts) > days * _dayMs;
+    };
+    const discoveriesCount = flowTracks.filter(t => addedInDays(t, 30) && (t.playCount || 0) >= 3).length;
+    const rediscoverCount = flowTracks.filter(t => (t.playCount || 0) >= 5 && olderThanDays(t, 90) && t.lastPlayed).length;
+    const oneShotCount = flowTracks.filter(t => (t.playCount || 0) === 1 && olderThanDays(t, 90)).length;
+    const neverCount = flowTracks.filter(t => !(t.playCount > 0)).length;
+    if (discoveriesCount > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'discoveries' ? ' active' : '') + '" onclick="flowSetViewMode(\'discoveries\', this)" title="Ajoutes ce mois et deja ecoutes 3 fois ou +">&#128247; Decouvertes (' + discoveriesCount + ')</span>';
+    if (rediscoverCount > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'rediscover' ? ' active' : '') + '" onclick="flowSetViewMode(\'rediscover\', this)" title="Hits oublies : 5+ ecoutes mais pas joues depuis 3 mois">&#128279; A redecouvrir (' + rediscoverCount + ')</span>';
+    if (oneShotCount > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'oneshot' ? ' active' : '') + '" onclick="flowSetViewMode(\'oneshot\', this)" title="Joues une seule fois il y a longtemps">&#128340; Coups d\'un soir (' + oneShotCount + ')</span>';
+    if (neverCount > 0) plHtml += '<span class="flow-pl-chip flow-pl-view' + (flowViewMode === 'never' ? ' active' : '') + '" onclick="flowSetViewMode(\'never\', this)" title="Jamais ecoutes">&#10067; Jamais ecoutes (' + neverCount + ')</span>';
     plHtml += '<span class="flow-pl-chip flow-pl-liked' + (flowViewMode === 'liked' ? ' active' : '') + '" onclick="flowSetViewMode(\'liked\', this)" title="Titres aim&eacute;s"><span class="chip-heart-big">&#10084;</span> Aim&eacute;s (' + likedCountF + ')</span>';
     const unassigned = flowTracks.filter(t => !t.playlist).length;
     if (plNames.length > 0 && unassigned > 0) {
@@ -5012,10 +7320,29 @@ function renderFlow() {
     let filtered = flowTracks.filter((t, i) => {
         const matchPl = flowViewMode || !flowCurrentPlaylist || (flowCurrentPlaylist === '__none__' ? !t.playlist : t.playlist === flowCurrentPlaylist);
         const matchSearch = !search || (t.title || '').toLowerCase().includes(search) || (t.channel || '').toLowerCase().includes(search);
+        const isAddedInDays = (track, days) => {
+            if (!track.addedAt) return false;
+            const ts = Date.parse(track.addedAt);
+            if (isNaN(ts)) return false;
+            return (_now - ts) <= days * _dayMs;
+        };
+        const isOlderThanDays = (track, days) => {
+            if (!track.lastPlayed) return false;
+            const ts = Date.parse(track.lastPlayed);
+            if (isNaN(ts)) return false;
+            return (_now - ts) > days * _dayMs;
+        };
         const matchView = !flowViewMode
             || (flowViewMode === 'liked' && t.liked)
             || (flowViewMode === 'top' && (t.playCount || 0) > 0)
-            || flowViewMode === 'recent';
+            || flowViewMode === 'recent'
+            || (flowViewMode === 'today' && flowInWindow(t, 1))
+            || (flowViewMode === 'week' && flowInWindow(t, 7))
+            || (flowViewMode === 'month' && flowInWindow(t, 30))
+            || (flowViewMode === 'discoveries' && isAddedInDays(t, 30) && (t.playCount || 0) >= 3)
+            || (flowViewMode === 'rediscover' && (t.playCount || 0) >= 5 && isOlderThanDays(t, 90) && t.lastPlayed)
+            || (flowViewMode === 'oneshot' && (t.playCount || 0) === 1 && isOlderThanDays(t, 90))
+            || (flowViewMode === 'never' && !(t.playCount > 0));
         return matchPl && matchSearch && matchView;
     });
 
@@ -5024,6 +7351,14 @@ function renderFlow() {
         filtered = [...filtered].sort((a, b) => (b.playCount || 0) - (a.playCount || 0)).slice(0, 20);
     } else if (flowViewMode === 'recent') {
         filtered = [...filtered].sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || '')).slice(0, 20);
+    } else if (flowViewMode === 'today' || flowViewMode === 'week' || flowViewMode === 'month') {
+        filtered = [...filtered].sort((a, b) => (b.lastPlayed || '').localeCompare(a.lastPlayed || ''));
+    } else if (flowViewMode === 'discoveries') {
+        filtered = [...filtered].sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
+    } else if (flowViewMode === 'rediscover' || flowViewMode === 'oneshot') {
+        filtered = [...filtered].sort((a, b) => (a.lastPlayed || '').localeCompare(b.lastPlayed || ''));
+    } else if (flowViewMode === 'never') {
+        filtered = [...filtered].sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
     }
 
     countEl.innerHTML = `<span class="ftc-count">${filtered.length} titre${filtered.length > 1 ? 's' : ''}</span>` + flowFormatTotalDuration(filtered);
@@ -5033,7 +7368,65 @@ function renderFlow() {
         return;
     }
 
-    list.innerHTML = filtered.map(t => {
+    // ---- Cover Top N (uniquement sur la vue "Tout", sans filtre ni recherche) ----
+    let coverHtml = '';
+    const showCover = !flowCurrentPlaylist && !flowViewMode && !search;
+    if (showCover) {
+        const topLimit = getFlowTopCoverLimit();
+        const topTracks = [...flowTracks]
+            .filter(t => (t.playCount || 0) > 0)
+            .sort((a, b) => (b.playCount || 0) - (a.playCount || 0))
+            .slice(0, topLimit);
+        if (topTracks.length > 0) {
+            const dlFormatSel = document.getElementById('flowDlFormat') ? document.getElementById('flowDlFormat').value : 'audio:mp3';
+            const dlFormat = dlFormatSel.split(':')[1];
+            const limitOpts = FLOW_TOP_COVER_OPTIONS
+                .map(n => '<option value="' + n + '"' + (n === topLimit ? ' selected' : '') + '>Top ' + n + '</option>')
+                .join('');
+            coverHtml = '<div class="flow-top-cover ftc-cols-' + topLimit + '">'
+                + '<div class="ftc-header">'
+                + '<span class="ftc-header-text"><span class="ftc-trophy">&#127942;</span> Top ' + topTracks.length + ' du moment <span class="ftc-sub">les plus ecoutes</span></span>'
+                + '<label class="ftc-limit-label">Afficher <select class="ftc-limit-select" onchange="setFlowTopCoverLimit(this.value)">' + limitOpts + '</select></label>'
+                + '</div>'
+                + '<div class="ftc-grid">'
+                + topTracks.map((t, i) => {
+                    const realIdx = flowTracks.indexOf(t);
+                    let thumb = t.thumbnail || '';
+                    if (!thumb && t.url) { const m = t.url.match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/hqdefault.jpg'; }
+                    const playing = realIdx === flowCurrentIdx;
+                    const vMatch = (t.url || '').match(/[?&]v=([^&]+)/);
+                    const vid = vMatch ? vMatch[1] : '';
+                    const inLib = vid && flowLibItems.some(item => item.url && item.url.includes(vid) && (item.format || '') === dlFormat);
+                    const plTag = t.playlist ? '<span class="fl-playlist-tag">' + t.playlist + '</span>' : '';
+                    const safeTitle = (t.title || 'Sans titre').replace(/"/g, '&quot;');
+                    return '<div class="ftc-card rank-' + (i + 1) + (playing ? ' fl-playing' : '') + (inLib ? ' fl-downloaded' : '') + '" data-idx="' + realIdx + '">'
+                        + '<div class="ftc-thumb-wrap" onclick="flowPlaySequential(' + realIdx + ',\'audio\')">'
+                        + (thumb ? '<img class="ftc-thumb" src="' + thumb + '" loading="lazy" alt="">' : '<div class="ftc-thumb ftc-no-thumb">&#9654;</div>')
+                        + '<span class="ftc-rank">#' + (i + 1) + '</span>'
+                        + '<span class="ftc-plays">&#9654; ' + (t.playCount || 0) + 'x</span>'
+                        + '<button class="ftc-play-overlay" onclick="event.stopPropagation(); flowPlaySequential(' + realIdx + ',\'audio\')" title="Lire">&#9654;</button>'
+                        + '</div>'
+                        + '<div class="ftc-body">'
+                        + '<div class="ftc-title-text" title="' + safeTitle + '">' + (t.title || 'Sans titre') + ' ' + plTag + (inLib ? ' <span class="fl-dl-badge">DL</span>' : '') + '</div>'
+                        + '<div class="ftc-meta">' + [t.channel, t.duration, t.year].filter(Boolean).join(' &middot; ') + '</div>'
+                        + '<div class="ftc-actions">'
+                        + '<button class="fl-like' + (t.liked ? ' liked' : '') + '" onclick="flowToggleLike(\'' + t.id + '\', this)" title="' + (t.liked ? 'Retirer des aim&eacute;s' : 'Aimer') + '">' + (t.liked ? '&#10084;' : '&#9825;') + '</button>'
+                        + '<button class="fl-play" onclick="flowPlaySequential(' + realIdx + ',\'audio\')" title="Lecture normale (suite dans l\'ordre)">&#9654; Ecouter</button>'
+                        + '<button class="fl-play fl-play-shuf" onclick="flowPlayShuffle(' + realIdx + ',\'audio\')" title="Lire puis enchainer aleatoirement">&#128256; Aleatoire</button>'
+                        + '<button class="fl-play fl-play-vid" onclick="flowPlaySequential(' + realIdx + ',\'video\')">&#9654; Video</button>'
+                        + (inLib
+                            ? '<span class="fl-play fl-play-already" title="Deja telecharge">&#10003; DL</span>'
+                            : '<button class="fl-play fl-play-dl" onclick="flowDownload(' + realIdx + ', this)">&#11015; DL</button>')
+                        + '<button class="fl-remove" onclick="flowRemove(\'' + t.id + '\')" title="Retirer">&#10005;</button>'
+                        + '</div>'
+                        + '</div>'
+                        + '</div>';
+                }).join('')
+                + '</div></div>';
+        }
+    }
+
+    list.innerHTML = coverHtml + filtered.map(t => {
         const realIdx = flowTracks.indexOf(t);
         let thumb = t.thumbnail || '';
         if (!thumb && t.url) { const m = t.url.match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
@@ -5054,7 +7447,7 @@ function renderFlow() {
             const inLib = vid && flowLibItems.some(item => item.url && item.url.includes(vid) && (item.format || '') === dlFormat);
 
             return '<div class="flow-track' + (playing ? ' fl-playing' : '') + (inLib ? ' fl-downloaded' : '') + '" data-idx="' + realIdx + '" draggable="true" ondragstart="flowDragStart(event, ' + realIdx + ')">'
-            + (thumb ? '<img class="fl-thumb" src="' + thumb + '" loading="lazy" onclick="flowPlay(' + realIdx + ',\'audio\')">' : '')
+            + (thumb ? '<img class="fl-thumb" src="' + thumb + '" loading="lazy" onclick="flowPlaySequential(' + realIdx + ',\'audio\')">' : '')
             + '<div class="fl-body">'
             + '<span class="fl-title">' + (t.title || 'Sans titre') + ' ' + plTag + (inLib ? ' <span class="fl-dl-badge">DL</span>' : '') + '</span>'
             + '<span class="fl-info">' + [t.channel, t.duration, t.year].filter(Boolean).join(' · ') + '</span>'
@@ -5062,8 +7455,9 @@ function renderFlow() {
             + '</div>'
             + (flowPlaylists.length > 0 ? '<select class="fl-move-select" onchange="flowMoveTrack(\'' + t.id + '\', this.value); this.selectedIndex=0;">' + plOptions + '</select>' : '')
             + '<button class="fl-like' + (t.liked ? ' liked' : '') + '" onclick="flowToggleLike(\'' + t.id + '\', this)" title="' + (t.liked ? 'Retirer des aim&eacute;s' : 'Aimer') + '">' + (t.liked ? '&#10084;' : '&#9825;') + '</button>'
-            + '<button class="fl-play" onclick="flowPlay(' + realIdx + ',\'audio\')">&#9654; Ecouter</button>'
-            + '<button class="fl-play fl-play-vid" onclick="flowPlay(' + realIdx + ',\'video\')">&#9654; Video</button>'
+            + '<button class="fl-play" onclick="flowPlaySequential(' + realIdx + ',\'audio\')" title="Lecture normale (suite dans l\'ordre)">&#9654; Ecouter</button>'
+            + '<button class="fl-play fl-play-shuf" onclick="flowPlayShuffle(' + realIdx + ',\'audio\')" title="Lire puis enchainer aleatoirement">&#128256; Aleatoire</button>'
+            + '<button class="fl-play fl-play-vid" onclick="flowPlaySequential(' + realIdx + ',\'video\')">&#9654; Video</button>'
             + (inLib
                 ? '<span class="fl-play fl-play-already" title="Deja telecharge">&#10003; DL</span>'
                 : '<button class="fl-play fl-play-dl" onclick="flowDownload(' + realIdx + ', this)">&#11015; DL</button>')
@@ -5098,48 +7492,78 @@ async function flowDropOnPlaylist(event, playlist) {
     try { data = JSON.parse(event.dataTransfer.getData('text/plain')); } catch (e) { return; }
 
     if (data.type === 'flow') {
-        // Deplacer un morceau de Mon Flow vers une playlist
-        await fetch('api/flow', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=move&id=' + data.id + '&playlist=' + encodeURIComponent(playlist)
-        });
+        await apiPost('api/flow', { action: 'move', id: data.id, playlist });
         loadFlow();
     } else if (data.type === 'history') {
-        // Ajouter depuis l'historique vers Mon Flow dans cette playlist
         const h = historyCache[data.idx];
         if (!h || !h.url) return;
-        await fetch('api/flow', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add&url=' + encodeURIComponent(h.url)
-                + '&title=' + encodeURIComponent(h.title || '')
-                + '&channel=' + encodeURIComponent(h.channel || '')
-                + '&thumbnail=' + encodeURIComponent(h.thumbnail || '')
-                + '&views=' + encodeURIComponent(h.views || '')
-                + '&year=' + encodeURIComponent(h.year || '')
-                + '&format=' + encodeURIComponent(h.format || '')
-                + '&type=' + encodeURIComponent(h.type || 'audio')
-                + '&playlist=' + encodeURIComponent(playlist)
+        await apiPost('api/flow', {
+            action: 'add', url: h.url,
+            title: h.title || '', channel: h.channel || '',
+            thumbnail: h.thumbnail || '', views: h.views || '',
+            year: h.year || '', format: h.format || '',
+            type: h.type || 'audio', playlist
         });
         loadFlow();
     }
 }
 
+// Convertit une chaine de vues YouTube en nombre.
+// Exemples : "91.0 M vues" -> 91_000_000 / "2.1 Md vues" -> 2_100_000_000 / "1,234,567 views" -> 1234567
+function parseFlowViews(s) {
+    if (!s) return 0;
+    const txt = String(s).toLowerCase().replace(/\s+/g, ' ').trim();
+    const m = txt.match(/([\d.,]+)\s*(md|mrd|b|m|k)?/i);
+    if (!m) return 0;
+    let n = parseFloat(m[1].replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(n)) {
+        // Cas "1,234,567" : virgules = separateurs de milliers
+        n = parseInt(m[1].replace(/[.,\s]/g, ''), 10) || 0;
+    }
+    const suf = (m[2] || '').toLowerCase();
+    if (suf === 'k') n *= 1e3;
+    else if (suf === 'm') n *= 1e6;
+    else if (suf === 'md' || suf === 'mrd' || suf === 'b') n *= 1e9;
+    return Math.round(n);
+}
+
+// "3:45" -> 225, "1:23:45" -> 5025, "" -> 0
+function parseFlowDuration(s) {
+    if (!s) return 0;
+    const parts = String(s).split(':').map(p => parseInt(p, 10));
+    if (parts.some(isNaN)) return 0;
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] || 0;
+}
+
 function sortFlow() {
     const sort = document.getElementById('flowSortBy').value;
+    // En cas d'egalite, on tranche par playCount desc puis date d'ajout desc -> ordre stable
+    const tieBreak = (a, b) => ((b.playCount || 0) - (a.playCount || 0))
+        || (b.addedAt || '').localeCompare(a.addedAt || '');
     flowTracks.sort((a, b) => {
+        let cmp = 0;
         switch (sort) {
-            case 'added-desc': return (b.addedAt || '').localeCompare(a.addedAt || '');
-            case 'added-asc': return (a.addedAt || '').localeCompare(b.addedAt || '');
-            case 'title-asc': return (a.title || '').localeCompare(b.title || '', 'fr');
-            case 'title-desc': return (b.title || '').localeCompare(a.title || '', 'fr');
-            case 'channel-asc': return (a.channel || '').localeCompare(b.channel || '', 'fr');
-            case 'plays-desc': return (b.playCount || 0) - (a.playCount || 0);
-            case 'plays-asc': return (a.playCount || 0) - (b.playCount || 0);
-            case 'recent-play': return (b.lastPlayed || '').localeCompare(a.lastPlayed || '');
-            case 'type-audio': return (a.type === 'audio' ? 0 : 1) - (b.type === 'audio' ? 0 : 1);
-            case 'type-video': return (a.type === 'video' ? 0 : 1) - (b.type === 'video' ? 0 : 1);
-            default: return 0;
+            case 'added-desc': cmp = (b.addedAt || '').localeCompare(a.addedAt || ''); break;
+            case 'added-asc': cmp = (a.addedAt || '').localeCompare(b.addedAt || ''); break;
+            case 'year-desc': cmp = (parseInt(b.year, 10) || 0) - (parseInt(a.year, 10) || 0); break;
+            case 'year-asc': cmp = (parseInt(a.year, 10) || 0) - (parseInt(b.year, 10) || 0); break;
+            case 'views-desc': cmp = parseFlowViews(b.views) - parseFlowViews(a.views); break;
+            case 'views-asc': cmp = parseFlowViews(a.views) - parseFlowViews(b.views); break;
+            case 'liked-first': cmp = (b.liked ? 1 : 0) - (a.liked ? 1 : 0); break;
+            case 'duration-desc': cmp = parseFlowDuration(b.duration) - parseFlowDuration(a.duration); break;
+            case 'duration-asc': cmp = parseFlowDuration(a.duration) - parseFlowDuration(b.duration); break;
+            case 'title-asc': cmp = (a.title || '').localeCompare(b.title || '', 'fr'); break;
+            case 'title-desc': cmp = (b.title || '').localeCompare(a.title || '', 'fr'); break;
+            case 'channel-asc': cmp = (a.channel || '').localeCompare(b.channel || '', 'fr'); break;
+            case 'plays-desc': cmp = (b.playCount || 0) - (a.playCount || 0); break;
+            case 'plays-asc': cmp = (a.playCount || 0) - (b.playCount || 0); break;
+            case 'recent-play': cmp = (b.lastPlayed || '').localeCompare(a.lastPlayed || ''); break;
+            case 'type-audio': cmp = (a.type === 'audio' ? 0 : 1) - (b.type === 'audio' ? 0 : 1); break;
+            case 'type-video': cmp = (a.type === 'video' ? 0 : 1) - (b.type === 'video' ? 0 : 1); break;
         }
+        return cmp !== 0 ? cmp : tieBreak(a, b);
     });
     renderFlow();
 }
@@ -5166,12 +7590,8 @@ function filterFlow() { renderFlow(); }
 async function flowToggleLike(id, btn) {
     console.log('[LIKE FLOW] click id=', id);
     try {
-        const resp = await fetch('api/flow', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=toggle_like&id=' + encodeURIComponent(id)
-        });
-        const data = await resp.json();
-        console.log('[LIKE FLOW] response', resp.status, data);
+        const data = await apiPost('api/flow', { action: 'toggle_like', id });
+        console.log('[LIKE FLOW] response', data);
         if (!data.success) { alert('Like refuse par le serveur : ' + (data.error || 'inconnu')); return; }
         const track = flowTracks.find(t => t.id === id);
         if (track) track.liked = data.liked;
@@ -5189,17 +7609,26 @@ async function flowPlay(idx, type) {
     const t = flowTracks[idx];
     if (!t || !t.url) return;
 
+    // Si un crossfade est en cours, on le commit (lecture demandee = on snap au nouveau titre)
+    if (isCrossfading()) cancelCrossfade('cancel');
+
     const bar = document.getElementById('playerBar');
-    const mainAudio = document.getElementById('audioEl');
+    const mainAudio = getActiveAudio();
     const videoOverlay = document.getElementById('videoOverlay');
 
-    // Arreter la lecture en cours
+    // Arreter la lecture en cours sur les DEUX elements (au cas ou)
     mainAudio.pause();
     mainAudio.src = '';
+    const otherA = getInactiveAudio();
+    try { otherA.pause(); otherA.src = ''; } catch (e) {}
 
     flowCurrentIdx = idx;
     flowCurrentType = type || 'audio';
-    playbackContext = 'flow';
+    setPlayerSource('flow');
+
+    // Sync l'etat des boutons mode du lecteur global avec le contexte flow
+    if (flowShuffle && playMode !== 'shuffle') playMode = 'shuffle';
+    if (typeof playerSyncModeButtons === 'function') playerSyncModeButtons();
 
     // Afficher le player bar
     bar.classList.add('active');
@@ -5234,7 +7663,9 @@ async function flowPlay(idx, type) {
     }
 
     // Enregistrer la lecture
-    fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=play&id=' + t.id }).catch(() => {});
+    apiPost('api/flow', { action: 'play', id: t.id }).catch(() => {});
+    notifyFlowTrack(t);
+    if (typeof maybeAutoOpenLyrics === 'function') maybeAutoOpenLyrics();
 
     // Video = iframe YouTube
     if (type === 'video') {
@@ -5251,8 +7682,7 @@ async function flowPlay(idx, type) {
             flowPreloaded = null;
         } else {
             document.getElementById('playerArtist').textContent = (t.channel || '') + ' · Chargement...';
-            const resp = await fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + type);
-            const data = await resp.json();
+            const data = await apiCall('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + type);
             if (!data.success) {
                 document.getElementById('playerArtist').textContent = 'Erreur : flux indisponible';
                 return;
@@ -5272,8 +7702,8 @@ async function flowPlay(idx, type) {
         // Pre-charger le suivant
         flowPreloadNext(idx, 'audio');
 
-        // A la fin, passer au suivant
-        mainAudio.onended = function() { flowNext('audio'); };
+        // L'auto-next est gere globalement via _onAudioEnded -> playerNext() -> flowNext()
+        mainAudio.onended = null;
 
     } catch (e) {
         document.getElementById('playerArtist').textContent = 'Erreur de connexion';
@@ -5297,6 +7727,11 @@ function flowGetVisibleTracks() {
 
 function flowNext(type) {
     type = type || flowCurrentType || 'audio';
+    // Repeat one : on rejoue le titre courant
+    if (typeof playMode !== 'undefined' && playMode === 'loopOne' && flowCurrentIdx >= 0) {
+        flowPlay(flowCurrentIdx, type);
+        return;
+    }
     const visible = flowGetVisibleTracks();
     if (visible.length === 0) return;
 
@@ -5308,10 +7743,16 @@ function flowNext(type) {
     } else {
         const curPos = visible.indexOf(flowCurrentIdx);
         if (curPos === -1 || curPos >= visible.length - 1) {
-            document.getElementById('flowMeta').textContent = 'Fin de la liste';
-            return;
+            // Repeat all : on reboucle au debut de la selection
+            if (typeof playMode !== 'undefined' && playMode === 'loop' && visible.length > 0) {
+                nextIdx = visible[0];
+            } else {
+                document.getElementById('flowMeta').textContent = 'Fin de la liste';
+                return;
+            }
+        } else {
+            nextIdx = visible[curPos + 1];
         }
-        nextIdx = visible[curPos + 1];
     }
     flowPlay(nextIdx, type);
 }
@@ -5324,44 +7765,186 @@ function flowPrev() {
 }
 
 function flowToggleShuffle() {
-    flowShuffle = !flowShuffle;
-    document.getElementById('flowShuffleBtn').classList.toggle('active', flowShuffle);
+    flowSetShuffle(!flowShuffle);
+}
+
+function flowSetShuffle(on) {
+    if (flowShuffle === !!on) return;
+    flowShuffle = !!on;
+    const btn = document.getElementById('flowShuffleBtn');
+    if (btn) btn.classList.toggle('active', flowShuffle);
+    flowPreloaded = null;
+    // Sync avec le mode du lecteur global
+    if (typeof playMode !== 'undefined') {
+        if (flowShuffle) {
+            playMode = 'shuffle';
+        } else if (playMode === 'shuffle') {
+            playMode = 'normal';
+        }
+        if (typeof playerSyncModeButtons === 'function') playerSyncModeButtons();
+    }
+}
+
+function flowPlaySequential(idx, type) {
+    flowSetShuffle(false);
+    flowPlay(idx, type || 'audio');
+}
+
+function flowPlayShuffle(idx, type) {
+    flowSetShuffle(true);
+    flowPlay(idx, type || 'audio');
 }
 
 function flowStop() {
-    const mainAudio = document.getElementById('audioEl');
-    mainAudio.pause();
-    mainAudio.src = '';
-    mainAudio.onended = null;
+    if (isCrossfading()) cancelCrossfade('cancel');
+    audioEl.pause(); audioEl.src = ''; audioEl.onended = null;
+    audioElB.pause(); audioElB.src = ''; audioElB.onended = null;
+    setActiveAudio(audioEl);
     document.getElementById('playerBar').classList.remove('active');
     document.body.classList.remove('player-open');
     document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
     flowCurrentIdx = -1;
     flowPreloaded = null;
-    playbackContext = 'library';
+    setPlayerSource('library');
 }
 
 function flowPreloadNext(currentIdx, type) {
+    // Repeat one : on rejouera la meme piste donc pas besoin de precharger
+    if (typeof playMode !== 'undefined' && playMode === 'loopOne') { flowPreloaded = null; return; }
     const visible = flowGetVisibleTracks();
     const curPos = visible.indexOf(currentIdx);
     let nextIdx;
     if (flowShuffle) {
         const others = visible.filter(i => i !== currentIdx);
         nextIdx = others.length > 0 ? others[Math.floor(Math.random() * others.length)] : -1;
+    } else if (curPos >= 0 && curPos < visible.length - 1) {
+        nextIdx = visible[curPos + 1];
+    } else if (typeof playMode !== 'undefined' && playMode === 'loop' && visible.length > 0) {
+        nextIdx = visible[0];
     } else {
-        nextIdx = (curPos >= 0 && curPos < visible.length - 1) ? visible[curPos + 1] : -1;
+        nextIdx = -1;
     }
     if (nextIdx === -1) { flowPreloaded = null; return; }
 
     const t = flowTracks[nextIdx];
-    fetch('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + type)
-        .then(r => r.json())
+    apiCall('api/stream?url=' + encodeURIComponent(t.url) + '&type=' + type)
         .then(data => {
             if (data.success && flowCurrentIdx === currentIdx) {
                 flowPreloaded = { idx: nextIdx, type, streamUrl: data.streamUrl };
             }
         })
         .catch(() => { flowPreloaded = null; });
+}
+
+// Calcule l'index de la prochaine piste sans declencher la lecture
+function flowComputeNextIdx() {
+    if (typeof playMode !== 'undefined' && playMode === 'loopOne') return -1; // pas de crossfade en loopOne
+    const visible = flowGetVisibleTracks();
+    if (visible.length === 0) return -1;
+    if (flowShuffle) {
+        const others = visible.filter(i => i !== flowCurrentIdx);
+        return others.length > 0 ? others[Math.floor(Math.random() * others.length)] : -1;
+    }
+    const curPos = visible.indexOf(flowCurrentIdx);
+    if (curPos === -1 || curPos >= visible.length - 1) {
+        return (typeof playMode !== 'undefined' && playMode === 'loop' && visible.length > 0) ? visible[0] : -1;
+    }
+    return visible[curPos + 1];
+}
+
+// Appele depuis le timeupdate du element actif : declenche le crossfade au bon moment
+async function maybeStartCrossfade(currentEl) {
+    if (isCrossfading()) return;
+    if (playbackContext !== 'flow') return;          // crossfade en flow uniquement
+    if (flowCurrentType !== 'audio') return;        // pas de crossfade en video
+    const xfade = getCrossfadeSeconds();
+    if (xfade <= 0) return;
+    const dur = currentEl.duration;
+    if (!dur || !isFinite(dur)) return;
+    const remain = dur - currentEl.currentTime;
+    // On declenche un peu avant le marqueur, pour avoir le temps de charger
+    if (remain > xfade + 0.4) return;
+    if (remain < 0.3) return; // trop tard pour overlap utile -> laisser ended faire le boulot
+    const nextIdx = flowComputeNextIdx();
+    if (nextIdx < 0) return;
+    const nextTrack = flowTracks[nextIdx];
+    if (!nextTrack || !nextTrack.url) return;
+    // Marquer immediatement pour eviter ple multiples declenchements pendant la fenetre
+    _xfState = { fromEl: currentEl, toEl: getInactiveAudio(), startVol: currentEl.volume, intervalId: null, doneCb: null };
+    try {
+        let streamUrl;
+        if (flowPreloaded && flowPreloaded.idx === nextIdx && flowPreloaded.type === 'audio') {
+            streamUrl = flowPreloaded.streamUrl;
+        } else {
+            const data = await apiCall('api/stream?url=' + encodeURIComponent(nextTrack.url) + '&type=audio');
+            if (!data.success) { _xfState = null; return; }
+            streamUrl = data.streamUrl;
+        }
+        if (!_xfState) return; // annule entre temps
+        startCrossfade(streamUrl, nextIdx, nextTrack);
+    } catch (e) {
+        _xfState = null;
+    }
+}
+
+function startCrossfade(nextStreamUrl, nextIdx, nextTrack) {
+    if (!_xfState) return;
+    const { fromEl, toEl, startVol } = _xfState;
+    const xfade = getCrossfadeSeconds();
+    toEl.src = nextStreamUrl;
+    toEl.volume = 0;
+    toEl.play().catch(() => {});
+    _xfState.nextIdx = nextIdx;
+    _xfState.nextTrack = nextTrack;
+    _xfState.finalize = function finalize() {
+        if (!_xfState) return;
+        clearInterval(_xfState.intervalId);
+        try { fromEl.pause(); fromEl.src = ''; } catch (e) {}
+        toEl.volume = startVol;
+        setActiveAudio(toEl);
+        _xfState = null;
+        flowCurrentIdx = nextIdx;
+        let thumb = nextTrack.thumbnail || '';
+        if (!thumb && nextTrack.url) { const m = nextTrack.url.match(/[?&]v=([^&]+)/); if (m) thumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+        document.getElementById('playerThumb').src = thumb;
+        document.getElementById('playerTitle').textContent = nextTrack.title || '';
+        document.getElementById('playerArtist').textContent = (nextTrack.channel || '') + ' · Streaming';
+        document.getElementById('btnPlayPause').innerHTML = '&#9646;&#9646;';
+        document.querySelectorAll('.flow-track').forEach(el => el.classList.remove('fl-playing'));
+        const trackEl = document.querySelector('.flow-track[data-idx="' + nextIdx + '"]');
+        if (trackEl) trackEl.classList.add('fl-playing');
+        apiPost('api/flow', { action: 'play', id: nextTrack.id }).catch(() => {});
+        notifyFlowTrack(nextTrack);
+        if (typeof maybeAutoOpenLyrics === 'function') maybeAutoOpenLyrics();
+        const nextNextIdx = getNextFlowIdx(nextIdx);
+        const nextEl = document.getElementById('playerNext');
+        if (nextNextIdx !== -1 && flowTracks[nextNextIdx]) {
+            const nt = flowTracks[nextNextIdx];
+            let nThumb = nt.thumbnail || '';
+            if (!nThumb && nt.url) { const m = nt.url.match(/[?&]v=([^&]+)/); if (m) nThumb = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg'; }
+            document.getElementById('playerNextTitle').textContent = nt.title || '';
+            document.getElementById('playerNextThumb').src = nThumb;
+            document.getElementById('playerNextThumb').style.display = nThumb ? '' : 'none';
+            if (nextEl) nextEl.style.display = 'flex';
+        } else {
+            if (nextEl) nextEl.style.display = 'none';
+        }
+        flowPreloaded = null;
+        flowPreloadNext(nextIdx, 'audio');
+    };
+    const startTs = Date.now();
+    const totalMs = xfade * 1000;
+    _xfState.intervalId = setInterval(() => {
+        if (!_xfState) return;
+        const elapsed = Date.now() - startTs;
+        const p = Math.min(1, elapsed / totalMs);
+        // courbe equal-power simple
+        const fadeOut = Math.cos(p * Math.PI / 2);
+        const fadeIn = Math.sin(p * Math.PI / 2);
+        try { fromEl.volume = Math.max(0, startVol * fadeOut); } catch (e) {}
+        try { toEl.volume = Math.max(0, startVol * fadeIn); } catch (e) {}
+        if (p >= 1) _xfState.finalize();
+    }, 50);
 }
 
 const FLOW_COLOR_PRESETS_BG = [
@@ -5402,7 +7985,7 @@ function flowOpenColorPicker(playlistName, anchor) {
             <input type="color" class="fcp-custom" data-kind="fg" value="${curFg || '#ffffff'}" title="Couleur personnalisee">
         </div>
         <div class="fcp-preview-row">
-            <span class="fcp-preview" id="fcpPreview" style="${curBg ? 'background:' + curBg + ';' : ''}${curFg ? 'color:' + curFg : ''}">${playlistName.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}</span>
+            <span class="fcp-preview" id="fcpPreview" style="${curBg ? 'background:' + curBg + ';' : ''}${curFg ? 'color:' + curFg : ''}">${escapeHtml(playlistName)}</span>
         </div>
         <div class="fcp-actions">
             <button class="fcp-btn-reset" onclick="flowApplyColor('${playlistName.replace(/'/g, "\\'")}', '', '')">Reinitialiser</button>
@@ -5487,9 +8070,7 @@ function flowSaveColorFromPopover(playlistName) {
 
 async function flowApplyColor(playlistName, bg, fg) {
     try {
-        const body = new URLSearchParams({ action: 'set_playlist_color', name: playlistName, bg: bg || '', fg: fg || '' });
-        const resp = await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
-        const data = await resp.json();
+        const data = await apiPost('api/flow', { action: 'set_playlist_color', name: playlistName, bg: bg || '', fg: fg || '' });
         if (!data.success) { alert('Erreur : ' + (data.error || 'inconnue')); return; }
         const pop = document.getElementById('flowColorPopover');
         if (pop) pop.remove();
@@ -5506,8 +8087,7 @@ function flowShowCreatePlaylist() {
 async function flowCreatePlaylist() {
     const name = document.getElementById('flowNewPlName').value.trim();
     if (!name) return;
-    const resp = await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=create_playlist&name=' + encodeURIComponent(name) });
-    const data = await resp.json();
+    const data = await apiPost('api/flow', { action: 'create_playlist', name });
     if (!data.success) { alert(data.error || 'Erreur'); return; }
     document.getElementById('flowNewPlName').value = '';
     document.getElementById('flowCreatePl').style.display = 'none';
@@ -5516,14 +8096,14 @@ async function flowCreatePlaylist() {
 
 async function flowDeletePlaylist(name) {
     if (!confirm('Supprimer la playlist "' + name + '" ?\nLes morceaux ne seront pas supprimes.')) return;
-    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=delete_playlist&name=' + encodeURIComponent(name) });
+    await apiPost('api/flow', { action: 'delete_playlist', name });
     if (flowCurrentPlaylist === name) flowCurrentPlaylist = '';
     loadFlow();
 }
 
 async function flowMoveTrack(id, playlist) {
     if (playlist === '__none__') playlist = '';
-    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=move&id=' + id + '&playlist=' + encodeURIComponent(playlist) });
+    await apiPost('api/flow', { action: 'move', id, playlist });
     loadFlow();
 }
 
@@ -5570,8 +8150,7 @@ async function flowYtDoSearch(loadMore) {
     const total = max * flowSearchPage;
 
     try {
-        const resp = await fetch('api/search?q=' + encodeURIComponent(query) + '&max=' + total);
-        const data = await resp.json();
+        const data = await apiCall('api/search?q=' + encodeURIComponent(query) + '&max=' + total);
         if (!data.success || !data.results || data.results.length === 0) {
             if (flowSearchPage === 1) {
                 resultsDiv.innerHTML = '<p style="color:var(--text-muted);text-align:center;">Aucun resultat.</p>';
@@ -5624,19 +8203,15 @@ async function flowAddFromSearch(idx) {
 
     try {
         // Recuperer les infos completes
-        const infoResp = await fetch('api/info', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'url=' + encodeURIComponent(r.url) });
-        const info = await infoResp.json();
-
-        await fetch('api/flow', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add&url=' + encodeURIComponent(r.url)
-                + '&title=' + encodeURIComponent(info.success ? info.title : r.title || '')
-                + '&channel=' + encodeURIComponent(info.success ? info.channel : r.channel || '')
-                + '&thumbnail=' + encodeURIComponent(info.success ? info.thumbnail : r.thumbnail || '')
-                + '&duration=' + encodeURIComponent(info.success ? info.duration : r.duration || '')
-                + '&views=' + encodeURIComponent(info.success ? info.views_display : '')
-                + '&year=' + encodeURIComponent(info.success ? info.year : '')
+        const info = await apiPost('api/info', { url: r.url });
+        await apiPost('api/flow', {
+            action: 'add', url: r.url,
+            title: info.success ? info.title : (r.title || ''),
+            channel: info.success ? info.channel : (r.channel || ''),
+            thumbnail: info.success ? info.thumbnail : (r.thumbnail || ''),
+            duration: info.success ? info.duration : (r.duration || ''),
+            views: info.success ? info.views_display : '',
+            year: info.success ? info.year : ''
         });
 
         if (btn) { btn.textContent = 'Ajoute !'; btn.style.background = 'var(--success)'; }
@@ -5661,8 +8236,7 @@ async function flowPlayPreview(encodedUrl) {
     if (m) thumbEl.src = 'https://i.ytimg.com/vi/' + m[1] + '/mqdefault.jpg';
 
     try {
-        const resp = await fetch('api/stream?url=' + encodeURIComponent(url) + '&type=audio');
-        const data = await resp.json();
+        const data = await apiCall('api/stream?url=' + encodeURIComponent(url) + '&type=audio');
         if (!data.success) { metaEl.textContent = 'Erreur'; return; }
         document.getElementById('flowVideo').style.display = 'none';
         audioEl.style.display = 'block';
@@ -5677,20 +8251,14 @@ async function flowAddByUrl() {
     if (!url || !url.includes('youtu')) return;
 
     try {
-        const infoResp = await fetch('api/info', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'url=' + encodeURIComponent(url) });
-        const info = await infoResp.json();
+        const info = await apiPost('api/info', { url });
         if (!info.success) { alert('Impossible de recuperer les infos.'); return; }
 
-        await fetch('api/flow', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add&url=' + encodeURIComponent(url)
-                + '&title=' + encodeURIComponent(info.title || '')
-                + '&channel=' + encodeURIComponent(info.channel || '')
-                + '&thumbnail=' + encodeURIComponent(info.thumbnail || '')
-                + '&duration=' + encodeURIComponent(info.duration || '')
-                + '&views=' + encodeURIComponent(info.views_display || '')
-                + '&year=' + encodeURIComponent(info.year || '')
+        await apiPost('api/flow', {
+            action: 'add', url,
+            title: info.title || '', channel: info.channel || '',
+            thumbnail: info.thumbnail || '', duration: info.duration || '',
+            views: info.views_display || '', year: info.year || ''
         });
         loadFlow();
     } catch (e) { alert('Erreur.'); }
@@ -5710,12 +8278,7 @@ async function flowDownload(idx, btn) {
 
     try {
 
-        const dlResp = await fetch('api/download', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'url=' + encodeURIComponent(t.url) + '&type=' + type + '&format=' + format + '&quality=' + quality + '&cover=1'
-        });
-        const dlData = await dlResp.json();
+        const dlData = await apiPost('api/download', { url: t.url, type, format, quality, cover: '1' });
 
         if (!dlData.success) {
             btn.textContent = 'Erreur';
@@ -5730,37 +8293,24 @@ async function flowDownload(idx, btn) {
         // Suivre la progression
         const poll = setInterval(async () => {
             try {
-                const pResp = await fetch('api/progress?id=' + dlData.jobId);
-                const pData = await pResp.json();
+                const pData = await apiCall('api/progress?id=' + dlData.jobId);
 
                 if (pData.status === 'done') {
                     clearInterval(poll);
                     btn.textContent = 'OK!';
                     btn.style.background = 'var(--success)';
 
-                    // Ajouter a la bibliotheque
-                    fetch('api/library', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: 'action=add_item&file=' + encodeURIComponent(pData.file || '')
-                            + '&title=' + encodeURIComponent(t.title || '')
-                            + '&type=' + type + '&format=' + format
-                            + '&folder=&thumbnail=' + encodeURIComponent(t.thumbnail || '')
-                            + '&channel=' + encodeURIComponent(t.channel || '')
-                            + '&duration=' + encodeURIComponent(t.duration || '')
-                            + '&cover=' + encodeURIComponent(pData.cover || '')
-                            + '&url=' + encodeURIComponent(t.url || '')
+                    apiPost('api/library', {
+                        action: 'add_item', file: pData.file || '', title: t.title || '',
+                        type, format, folder: '', thumbnail: t.thumbnail || '',
+                        channel: t.channel || '', duration: t.duration || '',
+                        cover: pData.cover || '', url: t.url || ''
                     }).catch(() => {});
 
-                    // Ajouter a l'historique
-                    fetch('api/history', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: 'action=add&title=' + encodeURIComponent(t.title || '') + '&status=success'
-                            + '&format=' + format + '&type=' + (t.type || 'audio')
-                            + '&url=' + encodeURIComponent(t.url || '')
-                            + '&channel=' + encodeURIComponent(t.channel || '')
-                            + '&thumbnail=' + encodeURIComponent(t.thumbnail || '')
+                    apiPost('api/history', {
+                        action: 'add', title: t.title || '', status: 'success',
+                        format, type: t.type || 'audio', url: t.url || '',
+                        channel: t.channel || '', thumbnail: t.thumbnail || ''
                     }).catch(() => {});
 
                     setTimeout(() => { btn.textContent = '⬇ DL'; btn.style.background = ''; btn.disabled = false; }, 3000);
@@ -5786,11 +8336,11 @@ async function flowRemove(id) {
     const title = track ? (track.title || '(sans titre)') : 'ce titre';
     confirmDialog({
         title: 'Retirer ce titre ?',
-        message: `<div style="margin-bottom:8px;">Tu vas retirer :</div><div style="background:var(--bg-hover);padding:10px 14px;border-radius:8px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;">${title.replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}</div><div style="margin-top:12px;font-size:12px;color:var(--text-muted);">&#9432; Le titre est place dans la <b>corbeille</b> et reste recuperable pendant <b>24h</b>.</div>`,
+        message: `<div style="margin-bottom:8px;">Tu vas retirer :</div><div style="background:var(--bg-hover);padding:10px 14px;border-radius:8px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;">${escapeHtml(title)}</div><div style="margin-top:12px;font-size:12px;color:var(--text-muted);">&#9432; Le titre est place dans la <b>corbeille</b> et reste recuperable pendant <b>24h</b>.</div>`,
         confirmText: 'Retirer',
         confirmStyle: 'danger',
         onConfirm: async () => {
-            await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=remove&id=' + id });
+            await apiPost('api/flow', { action: 'remove', id });
             showToast('Titre place dans la corbeille (24h pour le restaurer)');
             loadFlow();
         }
@@ -5798,103 +8348,59 @@ async function flowRemove(id) {
 }
 
 function confirmDialog(opts) {
-    const old = document.getElementById('confirmDialog');
-    if (old) old.remove();
-    const cfg = Object.assign({
-        title: 'Confirmation',
-        message: '',
-        confirmText: 'Confirmer',
-        cancelText: 'Annuler',
-        confirmStyle: 'primary',
-        onConfirm: () => {},
-        onCancel: () => {}
-    }, opts || {});
-
-    const confirmBg = cfg.confirmStyle === 'danger' ? 'var(--error,#f44336)' : 'var(--primary)';
-    const div = document.createElement('div');
-    div.id = 'confirmDialog';
-    div.className = 'modal-overlay active';
-    div.innerHTML = `
-        <div class="modal confirm-modal">
-            <h3 style="margin-top:0;margin-bottom:12px;font-size:17px;">${cfg.title}</h3>
-            <div style="font-size:13px;color:var(--text);margin-bottom:18px;">${cfg.message}</div>
-            <div class="modal-btns">
-                <button class="btn-cancel" id="cdlgCancel">${cfg.cancelText}</button>
-                <button id="cdlgConfirm" style="background:${confirmBg};color:#fff;border:none;border-radius:20px;font-weight:600;">${cfg.confirmText}</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(div);
-    const close = () => { div.remove(); document.removeEventListener('keydown', onKey); };
-    const onKey = (e) => {
-        if (e.key === 'Escape') { cfg.onCancel(); close(); }
-        else if (e.key === 'Enter') { cfg.onConfirm(); close(); }
-    };
-    div.querySelector('#cdlgCancel').onclick = () => { cfg.onCancel(); close(); };
-    div.querySelector('#cdlgConfirm').onclick = () => { cfg.onConfirm(); close(); };
-    div.onclick = (e) => { if (e.target === div) { cfg.onCancel(); close(); } };
-    document.addEventListener('keydown', onKey);
-    setTimeout(() => div.querySelector('#cdlgConfirm').focus(), 30);
+    const cfg = Object.assign({ confirmText: 'Confirmer', cancelText: 'Annuler', confirmStyle: 'primary', onConfirm: () => {}, onCancel: () => {} }, opts || {});
+    Modal.confirm({
+        title: cfg.title || 'Confirmation',
+        message: cfg.message || '',
+        confirmText: cfg.confirmText,
+        cancelText: cfg.cancelText,
+        danger: cfg.confirmStyle === 'danger'
+    }).then(ok => ok ? cfg.onConfirm() : cfg.onCancel());
 }
 
 async function flowOpenTrash() {
-    let modal = document.getElementById('flowTrashModal');
-    if (modal) modal.remove();
-
     let items = [];
     try {
-        const resp = await fetch('api/flow?action=trash_list');
-        const data = await resp.json();
+        const data = await apiCall('api/flow?action=trash_list');
         if (data.success) items = data.items || [];
     } catch (e) { alert('Erreur : ' + e.message); return; }
 
-    const fmtRemaining = (ms) => {
-        if (ms <= 0) return 'expire';
-        const totalSec = Math.floor(ms / 1000);
-        const h = Math.floor(totalSec / 3600);
-        const m = Math.floor((totalSec % 3600) / 60);
-        const s = totalSec % 60;
-        const pad = (n) => String(n).padStart(2, '0');
-        if (h > 0) return `${h}h ${pad(m)}min ${pad(s)}s`;
-        if (m > 0) return `${m}min ${pad(s)}s`;
-        return `${s}s`;
-    };
-    const esc = (s) => String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
-
     const rows = items.length ? items.map(it => {
-        const exp = fmtRemaining(it.remainingMs);
         const cls = it.remainingMs < 3600000 ? ' trash-row-warn' : '';
+        const exp = it.remainingMs <= 0 ? 'expire' : Format.duration(it.remainingMs);
         return `<div class="trash-row${cls}">
             <div class="trash-info">
-                <div class="trash-title" title="${esc(it.title || '')}">${esc(it.title || '(sans titre)')}</div>
-                <div class="trash-meta">${esc(it.channel || '')} ${it.playlist ? '&middot; <em>' + esc(it.playlist) + '</em>' : ''} &middot; supprime le ${esc(it.deletedAt || '')}</div>
+                <div class="trash-title" title="${escapeHtml(it.title || '')}">${escapeHtml(it.title || '(sans titre)')}</div>
+                <div class="trash-meta">${escapeHtml(it.channel || '')} ${it.playlist ? '&middot; <em>' + escapeHtml(it.playlist) + '</em>' : ''} &middot; supprime le ${escapeHtml(it.deletedAt || '')}</div>
                 <div class="trash-countdown">&#9201; ${exp} restant avant suppression definitive</div>
             </div>
             <div class="trash-actions">
-                <button onclick="flowTrashRestore('${it.id}')" class="trash-btn trash-btn-restore" title="Restaurer">&#8634; Restaurer</button>
-                <button onclick="flowTrashDelete('${it.id}')" class="trash-btn trash-btn-delete" title="Supprimer definitivement">&#128465;</button>
+                <button onclick="flowTrashRestore('${it.id}')" class="trash-btn trash-btn-restore">&#8634; Restaurer</button>
+                <button onclick="flowTrashDelete('${it.id}')" class="trash-btn trash-btn-delete">&#128465;</button>
             </div>
         </div>`;
     }).join('') : '<div style="text-align:center;padding:30px;color:var(--text-muted);">La corbeille est vide.</div>';
 
-    const html = `
-        <div class="modal-overlay active" id="flowTrashModal">
-            <div class="modal" style="width:560px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                    <h3 style="margin:0;">Corbeille de Mon Flow</h3>
-                    <button class="btn-cancel" onclick="document.getElementById('flowTrashModal').remove()" style="padding:6px 14px;font-size:13px;">Fermer</button>
-                </div>
-                <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Les titres retires sont conserves <b>24h</b> avant suppression definitive. Tu peux les restaurer ou les supprimer manuellement.</p>
-                <div style="flex:1;overflow-y:auto;margin-bottom:12px;">${rows}</div>
-                ${items.length ? '<button class="btn-cancel" onclick="flowTrashClear()" style="background:var(--error,#f44336);color:#fff;border-color:var(--error,#f44336);">Vider la corbeille</button>' : ''}
-            </div>
-        </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', html);
+    const m = Modal.custom({
+        title: 'Corbeille de Mon Flow',
+        width: 560,
+        html: `<p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Les titres retires sont conserves <b>24h</b> avant suppression definitive.</p>
+            <div style="max-height:50vh;overflow-y:auto;margin-bottom:12px;">${rows}</div>
+            <div class="modal-btns">
+                ${items.length ? '<button class="btn-cancel" id="trashClearBtn" style="background:var(--error,#f44336);color:#fff;border-color:var(--error,#f44336);">Vider la corbeille</button>' : ''}
+                <button class="btn-cancel" id="trashCloseBtn">Fermer</button>
+            </div>`,
+        onMount: (root, close) => {
+            root.id = 'flowTrashModal';
+            root.querySelector('#trashCloseBtn').onclick = close;
+            const clr = root.querySelector('#trashClearBtn');
+            if (clr) clr.onclick = () => { close(); flowTrashClear(); };
+        }
+    });
 }
 
 async function flowTrashRestore(id) {
-    await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=trash_restore&id=' + id });
+    await apiPost('api/flow', { action: 'trash_restore', id });
     showToast('Titre restaure');
     document.getElementById('flowTrashModal')?.remove();
     loadFlow();
@@ -5907,7 +8413,7 @@ function flowTrashDelete(id) {
         confirmText: 'Supprimer',
         confirmStyle: 'danger',
         onConfirm: async () => {
-            await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=trash_delete&id=' + id });
+            await apiPost('api/flow', { action: 'trash_delete', id });
             flowOpenTrash();
         }
     });
@@ -5920,7 +8426,7 @@ function flowTrashClear() {
         confirmText: 'Vider la corbeille',
         confirmStyle: 'danger',
         onConfirm: async () => {
-            await fetch('api/flow', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=trash_clear' });
+            await apiPost('api/flow', { action: 'trash_clear' });
             showToast('Corbeille videe');
             document.getElementById('flowTrashModal')?.remove();
         }
@@ -5930,19 +8436,13 @@ function flowTrashClear() {
 async function flowAddFromHistory() {
     // Ajouter tous les elements de l'historique qui ont une URL
     try {
-        const resp = await fetch('api/history?action=list');
-        const data = await resp.json();
+        const data = await apiCall('api/history?action=list');
         if (!data.success || !data.history) return;
 
         const items = data.history.filter(h => h.url && h.status === 'success');
         if (items.length === 0) { alert('Aucun element dans l\'historique.'); return; }
 
-        const addResp = await fetch('api/flow', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
-        });
-        const addData = await addResp.json();
+        const addData = await apiPost('api/flow', { action: 'add_bulk', items: JSON.stringify(items) });
         alert(addData.added + ' titre(s) ajoute(s) a Mon Flow' + (items.length - addData.added > 0 ? '\n' + (items.length - addData.added) + ' doublon(s) ignore(s)' : ''));
         loadFlow();
     } catch (e) { alert('Erreur.'); }
@@ -5965,12 +8465,7 @@ function flowImport(event) {
         try {
             const items = JSON.parse(e.target.result);
             if (!Array.isArray(items)) { alert('Fichier invalide.'); return; }
-            const resp = await fetch('api/flow', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'action=add_bulk&items=' + encodeURIComponent(JSON.stringify(items))
-            });
-            const data = await resp.json();
+            const data = await apiPost('api/flow', { action: 'add_bulk', items: JSON.stringify(items) });
             alert(data.added + ' titre(s) importe(s)');
             loadFlow();
         } catch (err) { alert('Erreur de lecture.'); }
@@ -5997,8 +8492,7 @@ function toggleHistory() {
 // ========== SYSTEM INFO / YTDLP UPDATE ==========
 async function loadCacheStats() {
     try {
-        const resp = await fetch('api/system?action=cache_stats');
-        const data = await resp.json();
+        const data = await apiCall('api/system?action=cache_stats');
         if (!data.success) return;
         const el = document.getElementById('cacheStats');
         if (!el) return;
@@ -6015,15 +8509,14 @@ async function loadCacheStats() {
 
 async function clearCache() {
     try {
-        await fetch('api/system?action=cache_clear');
+        await apiCall('api/system?action=cache_clear');
         loadCacheStats();
     } catch (e) {}
 }
 
 async function loadSystemInfo() {
     try {
-        const resp = await fetch('api/system?action=info');
-        const data = await resp.json();
+        const data = await apiCall('api/system?action=info');
         if (data.success) {
             document.getElementById('ytdlpVersion').textContent = 'yt-dlp : v' + data.ytdlp_version;
             document.getElementById('statDisk').textContent = data.disk_display;
@@ -6037,12 +8530,7 @@ async function updateYtdlp() {
     status.style.color = 'var(--text-secondary)';
 
     try {
-        const resp = await fetch('api/system', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=update'
-        });
-        const data = await resp.json();
+        const data = await apiPost('api/system', { action: 'update' });
         if (data.success) {
             status.textContent = 'OK ! v' + data.version;
             status.style.color = 'var(--success)';
@@ -6108,11 +8596,7 @@ function enableDragDrop() {
                 // Animation : le dossier pulse pour confirmer
                 chip.classList.add('drop-success');
 
-                await fetch('api/library', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'action=move_item&item_id=' + dragItemId + '&folder_id=' + encodeURIComponent(folderId)
-                });
+                await apiPost('api/library', { action: 'move_item', item_id: dragItemId, folder_id: folderId });
 
                 // Attendre la fin de l'animation avant de recharger
                 setTimeout(() => {

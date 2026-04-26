@@ -17,6 +17,7 @@ function saveHistory(data) {
 
 router.all('/', (req, res) => {
     const action = req.body.action || req.query.action || 'list';
+    const profileId = req.body.profile || req.query.profile || '';
 
     switch (action) {
         case 'list':
@@ -48,7 +49,8 @@ router.all('/', (req, res) => {
                         ts: entry.date, kind: 'dl',
                         source: entry.type === 'video' ? 'video' : 'audio',
                         title: entry.title, channel: entry.channel,
-                        url: entry.url, format: entry.format
+                        url: entry.url, format: entry.format,
+                        profileId
                     });
                 } catch (e) { /* stats best-effort */ }
             }

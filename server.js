@@ -60,6 +60,8 @@ loadRoute('/api/convert', './api/convert');
 loadRoute('/api/stream', './api/stream');
 loadRoute('/api/flow', './api/flow');
 loadRoute('/api/stats', './api/stats');
+loadRoute('/api/lyrics', './api/lyrics');
+loadRoute('/api/description', './api/description');
 
 try {
     const statsModule = require('./api/stats');

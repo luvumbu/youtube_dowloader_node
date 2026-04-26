@@ -7,6 +7,36 @@ const router = express.Router();
 const STATS_DIR = path.join(config.DATA_DIR, 'stats');
 const SETTINGS_FILE = path.join(STATS_DIR, '_settings.json');
 const MIGRATION_FLAG = path.join(STATS_DIR, '.migrated');
+const PROFILE_MIGRATION_FLAG = path.join(STATS_DIR, '.migrated-profiles');
+
+function getDefaultProfileId() {
+    try {
+        const profiles = JSON.parse(fs.readFileSync(config.PROFILES_FILE, 'utf8'));
+        if (Array.isArray(profiles) && profiles.length) return profiles[0].id;
+    } catch (e) {}
+    return '';
+}
+
+// Assigne profileId aux evenements legacy (sans profil) au profil par defaut.
+// S'execute une seule fois au demarrage (flag .migrated-profiles).
+function migrateProfilesOnce() {
+    if (fs.existsSync(PROFILE_MIGRATION_FLAG)) return;
+    const defaultId = getDefaultProfileId();
+    if (!defaultId) return;
+    let touched = 0;
+    listPartitionKeys().forEach(k => {
+        const f = path.join(STATS_DIR, k + '.json');
+        const data = loadPartitionByPath(f);
+        if (!data || !data.events) return;
+        let changed = false;
+        for (const e of data.events) {
+            if (!e.profileId) { e.profileId = defaultId; touched++; changed = true; }
+        }
+        if (changed) fs.writeFileSync(f, JSON.stringify(data));
+    });
+    fs.writeFileSync(PROFILE_MIGRATION_FLAG, new Date().toISOString());
+    if (touched > 0) console.log(`[stats] migration profils : ${touched} evenement(s) assigne(s) au profil par defaut.`);
+}
 
 const VALID_STRATEGIES = ['monthly', 'yearly', 'single'];
 
@@ -124,7 +154,9 @@ function recordEvent(ev) {
     let data = loadPartition(key) || emptyPartition(key);
 
     const compact = {
-        ts, kind: ev.kind || 'dl', src: ev.source || 'audio',
+        ts,
+        profileId: ev.profileId || '',
+        kind: ev.kind || 'dl', src: ev.source || 'audio',
         title: ev.title || '', artist: ev.artist || extractArtist(ev.title, ev.channel),
         url: ev.url || '', format: ev.format || ''
     };
@@ -213,7 +245,7 @@ function changeStrategy(newStrategy) {
     return { changed: true, count: allEvents.length, strategy: newStrategy };
 }
 
-function aggregateForView(view, year, month) {
+function aggregateForView(view, year, month, profileId) {
     const allKeys = listPartitionKeys();
     const events = [];
     allKeys.forEach(k => {
@@ -222,6 +254,7 @@ function aggregateForView(view, year, month) {
     });
 
     const filtered = events.filter(e => {
+        if (profileId && (e.profileId || '') !== profileId) return false;
         const p = parseTs(e.ts); if (!p) return false;
         if (view === 'global' || view === 'year') return true;
         if (view === 'month') return p.Y === year;
@@ -257,13 +290,14 @@ function aggregateForView(view, year, month) {
     return { total: filtered.length, buckets, byArtist };
 }
 
-function detailsForBucket(view, key, year, month) {
+function detailsForBucket(view, key, year, month, profileId) {
     const allKeys = listPartitionKeys();
     const items = [];
     allKeys.forEach(k => {
         const data = loadPartitionByPath(path.join(STATS_DIR, k + '.json'));
         if (!data || !data.events) return;
         data.events.forEach(e => {
+            if (profileId && (e.profileId || '') !== profileId) return;
             const p = parseTs(e.ts); if (!p) return;
             let match = false;
             if (view === 'global') match = p.H === key;
@@ -302,13 +336,15 @@ function storageInfo() {
 router.all('/', (req, res) => {
     try {
         migrateOnce(false);
+        migrateProfilesOnce();
         const action = req.body.action || req.query.action || 'get';
+        const profileId = req.body.profile || req.query.profile || '';
 
         if (action === 'get') {
             const view = req.query.view || req.body.view || 'global';
             const year = parseInt(req.query.year || req.body.year || '0', 10) || null;
             const month = parseInt(req.query.month || req.body.month || '0', 10) || null;
-            const result = aggregateForView(view, year, month);
+            const result = aggregateForView(view, year, month, profileId);
             return res.json({ success: true, view, ...result, availableMonths: listPartitionKeys() });
         }
 
@@ -317,7 +353,7 @@ router.all('/', (req, res) => {
             const key = parseInt(req.query.key || req.body.key || '0', 10);
             const year = parseInt(req.query.year || req.body.year || '0', 10) || null;
             const month = parseInt(req.query.month || req.body.month || '0', 10) || null;
-            const items = detailsForBucket(view, key, year, month);
+            const items = detailsForBucket(view, key, year, month, profileId);
             items.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
             const limit = parseInt(req.query.limit || '500', 10);
             return res.json({ success: true, total: items.length, items: items.slice(0, limit) });
@@ -327,7 +363,7 @@ router.all('/', (req, res) => {
             const view = req.query.view || req.body.view || 'global';
             const year = parseInt(req.query.year || req.body.year || '0', 10) || null;
             const month = parseInt(req.query.month || req.body.month || '0', 10) || null;
-            const result = aggregateForView(view, year, month);
+            const result = aggregateForView(view, year, month, profileId);
             const sorted = Object.entries(result.byArtist).sort((a, b) => b[1] - a[1]).slice(0, 10);
             return res.json({ success: true, top: sorted });
         }
@@ -336,7 +372,8 @@ router.all('/', (req, res) => {
             const ok = recordEvent({
                 ts: req.body.ts, kind: req.body.kind, source: req.body.source,
                 title: req.body.title, channel: req.body.channel, artist: req.body.artist,
-                url: req.body.url, format: req.body.format
+                url: req.body.url, format: req.body.format,
+                profileId
             });
             return res.json({ success: ok });
         }

@@ -1,5 +1,6 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const router = express.Router();
 
@@ -89,6 +90,67 @@ router.all('/', (req, res) => {
         case 'logout':
             res.json({ success: true });
             break;
+
+        case 'delete': {
+            const username = (req.body.username || req.query.username || '').trim();
+            if (!username) return res.json({ success: false, error: 'Nom requis.' });
+            const idx = profiles.findIndex(p => p.username === username);
+            if (idx < 0) return res.json({ success: false, error: 'Profil introuvable.' });
+            const profile = profiles[idx];
+            const profileId = profile.id;
+
+            // Cascade dans flow.json (pistes / playlists / corbeille du profil)
+            let flowTracks = 0, flowPlaylists = 0, flowTrash = 0;
+            try {
+                const flowFile = path.join(config.DATA_DIR, 'flow.json');
+                if (fs.existsSync(flowFile)) {
+                    const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
+                    flowTracks = (flow.tracks || []).filter(t => (t.profileId || '') === profileId).length;
+                    flowPlaylists = (flow.playlists || []).filter(p => (p.profileId || '') === profileId).length;
+                    flowTrash = (flow.trash || []).filter(t => (t.profileId || '') === profileId).length;
+                    flow.tracks = (flow.tracks || []).filter(t => (t.profileId || '') !== profileId);
+                    flow.playlists = (flow.playlists || []).filter(p => (p.profileId || '') !== profileId);
+                    flow.trash = (flow.trash || []).filter(t => (t.profileId || '') !== profileId);
+                    fs.writeFileSync(flowFile, JSON.stringify(flow, null, 2));
+                }
+            } catch (e) { console.error('[profile] cascade flow:', e.message); }
+
+            // Cascade dans les partitions stats
+            let statsDeleted = 0;
+            try {
+                const statsDir = path.join(config.DATA_DIR, 'stats');
+                if (fs.existsSync(statsDir)) {
+                    const files = fs.readdirSync(statsDir).filter(n => /^(all|\d{4}|\d{4}-\d{2})\.json$/.test(n));
+                    for (const f of files) {
+                        const fp = path.join(statsDir, f);
+                        try {
+                            const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
+                            if (!data.events) continue;
+                            const before = data.events.length;
+                            data.events = data.events.filter(e => (e.profileId || '') !== profileId);
+                            const removed = before - data.events.length;
+                            if (removed > 0) {
+                                statsDeleted += removed;
+                                fs.writeFileSync(fp, JSON.stringify(data));
+                            }
+                        } catch (e) {}
+                    }
+                }
+            } catch (e) { console.error('[profile] cascade stats:', e.message); }
+
+            // Supprimer le profil de profiles.json
+            profiles.splice(idx, 1);
+            saveProfiles(profiles);
+            console.log(`[profile] supprime : ${username} (${profileId}) - flow: ${flowTracks} pistes, ${flowPlaylists} playlists, ${flowTrash} corbeille / stats: ${statsDeleted} events`);
+            res.json({
+                success: true,
+                profileId,
+                flowTracks, flowPlaylists, flowTrash,
+                statsDeleted,
+                remaining: profiles.length
+            });
+            break;
+        }
 
         default:
             res.json({ success: false, error: 'Action inconnue.' });

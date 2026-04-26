@@ -299,15 +299,31 @@ if exist "%~dp0python_local\python.exe" set "PATH=%~dp0python_local;%~dp0python_
 :: ============================================================
 :: ICONE + RACCOURCI BUREAU
 :: ============================================================
-if not exist "icon.ico" (
-    if exist "create-icon.js" (
+:: Regenerer l'icone si la source create-icon.js est plus recente que icon.ico
+:: (ou si icon.ico n'existe pas).
+if exist "create-icon.js" (
+    set "REGEN_ICON="
+    if not exist "icon.ico" set "REGEN_ICON=1"
+    if exist "icon.ico" (
+        for %%A in ("create-icon.js") do set "JS_TIME=%%~tA"
+        for %%A in ("icon.ico") do set "ICO_TIME=%%~tA"
+        if "!JS_TIME!" GTR "!ICO_TIME!" set "REGEN_ICON=1"
+    )
+    if defined REGEN_ICON (
+        echo   Generation de l'icone...
         node create-icon.js >nul 2>&1
     )
 )
 
-set "SHORTCUT=%USERPROFILE%\Desktop\YouTube Downloader.lnk"
-if not exist "%SHORTCUT%" (
-    powershell -ExecutionPolicy Bypass -File "%~dp0create-shortcut.ps1" -TargetPath "%~dp0start.bat" -WorkDir "%~dp0" -IconPath "%~dp0icon.ico" >nul 2>&1
+:: Le PS1 utilise [Environment]::GetFolderPath("Desktop") qui respecte OneDrive.
+:: On l'appelle systematiquement : il skip tout seul si le raccourci existe deja.
+:: ATTENTION : %~dp0 termine par un backslash. Avec "%~dp0", le \ avant " devient
+:: une echappee et casse le parsing des args suivants. On utilise %~dp0. (sans
+:: guillemets) ou on retire le backslash final via WORKDIR_NB.
+set "WORKDIR_NB=%~dp0"
+if "%WORKDIR_NB:~-1%"=="\" set "WORKDIR_NB=%WORKDIR_NB:~0,-1%"
+if exist "%~dp0create-shortcut.ps1" (
+    powershell -ExecutionPolicy Bypass -File "%~dp0create-shortcut.ps1" -TargetPath "%WORKDIR_NB%\start.bat" -WorkDir "%WORKDIR_NB%" -IconPath "%WORKDIR_NB%\icon.ico"
 )
 
 :: ============================================================

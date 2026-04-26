@@ -49,6 +49,8 @@
 <div class="theme-toggle" id="themeIcon" onclick="toggleTheme()" title="Changer le theme">&#9728;</div>
 <div class="notif-toggle" id="notifToggle" onclick="toggleNotifications()" title="Notifications activees">🔔</div>
 
+<canvas id="bgVisualizer" class="bg-visualizer" width="800" height="200"></canvas>
+
 <div class="app">
 
     <div class="welcome-bar" id="welcomeBar" style="display:none;">
@@ -65,6 +67,7 @@
         <div class="tab" onclick="switchTab('flow')" ondragover="event.preventDefault(); this.classList.add('tab-dragover')" ondragleave="this.classList.remove('tab-dragover')" ondrop="this.classList.remove('tab-dragover'); flowDropOnTab(event)">Mon Flow</div>
         <div class="tab" onclick="switchTab('stats')">Stats</div>
         <div class="tab" onclick="switchTab('profile')">Profil</div>
+        <div class="tab" onclick="switchTab('help')">Aide</div>
     </div>
 
     <!-- TAB DOWNLOAD -->
@@ -118,17 +121,24 @@
             </div>
 
             <div class="progress-zone" id="progressZone">
+                <button class="pz-close" id="pzClose" onclick="dismissDownloadFeedback()" title="Effacer ce panneau">&times;</button>
                 <div class="progress-bar-bg">
                     <div class="progress-bar" id="progressBar"></div>
                 </div>
                 <div class="progress-text" id="progressText">Demarrage...</div>
-                <button class="btn-cancel" id="btnCancel" onclick="cancelDownload()" style="display:none;">Annuler</button>
+                <div class="pz-actions">
+                    <button class="btn-cancel" id="btnCancel" onclick="cancelDownload()" style="display:none;">Annuler</button>
+                    <button class="btn-cancel" id="btnDismissFeedback" onclick="dismissDownloadFeedback()" style="display:none;">Effacer le panneau</button>
+                </div>
             </div>
 
             <div id="result"></div>
 
             <div class="queue-section" id="queueSection" style="display:none;">
-                <h3>File d'attente <span class="queue-count" id="queueCount">0</span></h3>
+                <h3>File d'attente <span class="queue-count" id="queueCount">0</span>
+                    <button class="qs-clear" onclick="clearQueueAll()" title="Vider toute la file" style="margin-left:auto;">&#10005; Tout vider</button>
+                    <button class="qs-clear" onclick="clearQueueDone()" title="Retirer les telechargements termines/en erreur">&#10003; Termines</button>
+                </h3>
                 <div id="queueList"></div>
             </div>
 
@@ -171,7 +181,10 @@
                 <div class="sq-list" id="sqList"></div>
             </div>
 
-            <div id="searchResults"></div>
+            <div class="search-with-sugg">
+                <div id="searchResults"></div>
+                <aside id="searchSuggestions" class="search-sugg-panel" style="display:none;"></aside>
+            </div>
         </div>
     </div>
 
@@ -438,6 +451,127 @@
                     <button class="btn-save-prefs" onclick="savePrefs()">Sauvegarder les preferences</button>
                 </div>
                 <div class="profile-card" style="margin-top:15px;">
+                    <h2>Spectre visuel musical</h2>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Effet visuel anime en arriere-plan pendant la lecture. Reglages sauvegardes localement.</p>
+
+                    <div class="pref-section">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="vizEnabled" checked onchange="updateVizSettings()"> Activer le spectre en arriere-plan
+                        </label>
+                    </div>
+
+                    <div class="pref-section" id="vizSettingsBlock">
+                        <label>Opacite : <span id="vizOpacityVal">32%</span></label>
+                        <input type="range" id="vizOpacity" min="0" max="100" value="32" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label style="margin-top:10px;display:block;">Flou : <span id="vizBlurVal">14px</span></label>
+                        <input type="range" id="vizBlur" min="0" max="60" value="14" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label style="margin-top:10px;display:block;">Saturation : <span id="vizSatVal">1.5</span></label>
+                        <input type="range" id="vizSat" min="50" max="300" value="150" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label style="margin-top:10px;display:block;">Hauteur : <span id="vizHeightVal">200px</span></label>
+                        <input type="range" id="vizHeight" min="50" max="500" step="10" value="200" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label style="margin-top:10px;display:block;">Mode de fusion :</label>
+                        <select id="vizBlend" onchange="updateVizSettings()" class="sort-select" style="width:100%;">
+                            <option value="screen" selected>Screen (couleurs ajoutees)</option>
+                            <option value="multiply">Multiply (couleurs assombries)</option>
+                            <option value="overlay">Overlay (contraste)</option>
+                            <option value="lighten">Lighten</option>
+                            <option value="normal">Normal (opaque)</option>
+                        </select>
+
+                        <label style="margin-top:10px;display:block;">Position :</label>
+                        <select id="vizPos" onchange="updateVizSettings()" class="sort-select" style="width:100%;">
+                            <option value="top" selected>Haut de l'ecran</option>
+                            <option value="bottom">Bas (au-dessus du player)</option>
+                            <option value="middle">Centre vertical</option>
+                            <option value="full">Plein ecran</option>
+                        </select>
+
+                        <label style="margin-top:10px;display:block;">Theme couleur :</label>
+                        <select id="vizTheme" onchange="updateVizSettings()" class="sort-select" style="width:100%;">
+                            <option value="auto" selected>Auto (degrade par frequence)</option>
+                            <option value="rainbow">Arc-en-ciel</option>
+                            <option value="warm">Chaud (rouge / orange / jaune)</option>
+                            <option value="cool">Froid (bleu / violet / cyan)</option>
+                            <option value="green">Vert / cyan</option>
+                            <option value="mono">Monochrome (1 seule couleur)</option>
+                            <option value="custom">Couleur personnalisee</option>
+                        </select>
+
+                        <div id="vizCustomHueRow" style="display:none;margin-top:8px;">
+                            <label>Teinte personnalisee : <span id="vizHueVal">280</span>&deg;</label>
+                            <input type="range" id="vizHue" min="0" max="360" value="280" oninput="updateVizSettings()" style="width:100%;">
+                        </div>
+
+                        <label style="margin-top:10px;display:block;">Style des barres :</label>
+                        <select id="vizStyle" onchange="updateVizSettings()" class="sort-select" style="width:100%;">
+                            <option value="bars" selected>Barres classiques</option>
+                            <option value="mirror">Barres miroir (centre)</option>
+                            <option value="wave">Vague (courbe lisse)</option>
+                            <option value="dots">Points</option>
+                            <option value="filled">Aire pleine</option>
+                            <option value="line">Trait fin</option>
+                        </select>
+
+                        <label style="margin-top:10px;display:block;">Nombre de barres : <span id="vizBarsVal">48</span></label>
+                        <input type="range" id="vizBars" min="12" max="160" step="4" value="48" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label style="margin-top:10px;display:block;">Sensibilite : <span id="vizSensVal">1.0</span></label>
+                        <input type="range" id="vizSens" min="50" max="350" value="100" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label style="margin-top:10px;display:block;">Lissage : <span id="vizSmoothVal">30%</span></label>
+                        <input type="range" id="vizSmooth" min="0" max="95" value="30" oninput="updateVizSettings()" style="width:100%;">
+
+                        <label class="checkbox-label" style="margin-top:10px;">
+                            <input type="checkbox" id="vizGlow" onchange="updateVizSettings()"> Effet glow (auras lumineuses)
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="vizReverse" onchange="updateVizSettings()"> Inverser l'orientation (haut en bas)
+                        </label>
+                    </div>
+
+                    <button onclick="resetVizSettings()" style="background:var(--border);color:var(--text);border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;margin-top:10px;">Reinitialiser</button>
+                </div>
+                <div class="profile-card" style="margin-top:15px;">
+                    <h2>Mon Flow - Notifications & Paroles</h2>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Active les notifications systeme quand un nouveau titre demarre dans Mon Flow. Et les paroles synchronisees via lrclib.net.</p>
+                    <div class="pref-section">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="prefFlowNotif" onchange="setFlowNotifEnabled(this.checked)"> Notifier quand un titre demarre (fenetre en arriere-plan)
+                        </label>
+                    </div>
+                    <div class="pref-section">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="prefLyricsAuto" onchange="setLyricsAutoOpen(this.checked)"> Ouvrir automatiquement le panneau Paroles
+                        </label>
+                    </div>
+                </div>
+                <div class="profile-card" style="margin-top:15px;">
+                    <h2>Lecture - Crossfade</h2>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Fondu enchaine entre deux titres consecutifs (Mon Flow, audio uniquement). 0 = desactive.</p>
+                    <div class="pref-section">
+                        <label>Duree du fondu : <span id="prefCrossfadeVal">desactive</span></label>
+                        <input type="range" id="prefCrossfadeSlider" min="0" max="8" step="1" value="0" oninput="setCrossfadeSeconds(this.value)" style="width:100%;">
+                    </div>
+                </div>
+                <div class="profile-card" style="margin-top:15px;">
+                    <h2>Onglet Recherche</h2>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">Reglages de l'affichage des recherches recentes. Le programme conserve au maximum 100 recherches en memoire.</p>
+                    <div class="pref-section">
+                        <label>Nombre de recherches recentes a afficher</label>
+                        <select id="prefSearchHistoryLimit" onchange="setSearchHistoryDisplayLimit(this.value)" class="sort-select" style="width:100%;">
+                            <option value="10">10</option>
+                            <option value="20" selected>20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="profile-card" style="margin-top:15px;">
                     <h2>Cache</h2>
                     <p style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Le cache reduit les appels a YouTube en gardant les resultats en memoire.</p>
                     <div id="cacheStats" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
@@ -487,16 +621,33 @@
                 </optgroup>
             </select>
             <select id="flowSortBy" onchange="sortFlow()" class="sort-select">
-                <option value="added-desc">Ajout (recent)</option>
-                <option value="added-asc">Ajout (ancien)</option>
-                <option value="title-asc">Titre A-Z</option>
-                <option value="title-desc">Titre Z-A</option>
-                <option value="channel-asc">Artiste A-Z</option>
-                <option value="plays-desc">Plus ecoutes</option>
-                <option value="plays-asc">Moins ecoutes</option>
-                <option value="recent-play">Ecoute recemment</option>
-                <option value="type-audio">Audio d'abord</option>
-                <option value="type-video">Video d'abord</option>
+                <optgroup label="Ecoutes (local)">
+                    <option value="plays-desc" selected>Plus ecoutes (defaut)</option>
+                    <option value="plays-asc">Moins ecoutes</option>
+                    <option value="recent-play">Ecoute recemment</option>
+                </optgroup>
+                <optgroup label="Date">
+                    <option value="added-desc">Ajout (recent)</option>
+                    <option value="added-asc">Ajout (ancien)</option>
+                    <option value="year-desc">Annee de sortie (recent)</option>
+                    <option value="year-asc">Annee de sortie (ancien)</option>
+                </optgroup>
+                <optgroup label="Popularite YouTube">
+                    <option value="views-desc">Vues (+)</option>
+                    <option value="views-asc">Vues (-)</option>
+                </optgroup>
+                <optgroup label="Local">
+                    <option value="liked-first">Aimes d'abord</option>
+                    <option value="duration-desc">Duree (long)</option>
+                    <option value="duration-asc">Duree (court)</option>
+                </optgroup>
+                <optgroup label="Texte / Type">
+                    <option value="title-asc">Titre A-Z</option>
+                    <option value="title-desc">Titre Z-A</option>
+                    <option value="channel-asc">Artiste A-Z</option>
+                    <option value="type-audio">Audio d'abord</option>
+                    <option value="type-video">Video d'abord</option>
+                </optgroup>
             </select>
             <button class="btn-small" style="background:#4CAF50;color:#fff;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="flowAddFromHistory()">+ Depuis l'historique</button>
             <button class="btn-small" style="background:#FF9800;color:#fff;border:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;" onclick="document.getElementById('flowImportFile').click()">Importer</button>
@@ -645,6 +796,263 @@
         </div>
     </div>
 
+    <!-- TAB AIDE / DOC -->
+    <div class="tab-content" id="tab-help">
+        <div class="help-container">
+            <div class="help-hero">
+                <h1>📖 Guide d'utilisation</h1>
+                <p>Toutes les fonctionnalites expliquees + mini-tutos pas-a-pas pour bien demarrer.</p>
+                <div class="help-quick-nav">
+                    <a href="#help-tour" class="help-nav-pill">Vue d'ensemble</a>
+                    <a href="#help-dl" class="help-nav-pill">Telecharger</a>
+                    <a href="#help-search" class="help-nav-pill">Recherche</a>
+                    <a href="#help-lib" class="help-nav-pill">Bibliotheque</a>
+                    <a href="#help-flow" class="help-nav-pill">Mon Flow</a>
+                    <a href="#help-lyrics" class="help-nav-pill">Paroles</a>
+                    <a href="#help-karaoke" class="help-nav-pill">Karaoke</a>
+                    <a href="#help-stats" class="help-nav-pill">Stats</a>
+                    <a href="#help-shortcuts" class="help-nav-pill">Raccourcis</a>
+                    <a href="#help-trouble" class="help-nav-pill">Depannage</a>
+                </div>
+            </div>
+
+            <details class="help-card" open id="help-tour">
+                <summary><span class="help-emoji">🗺</span> Vue d'ensemble des onglets</summary>
+                <div class="help-body">
+                    <ul class="help-list">
+                        <li><strong>Telecharger</strong> : colle une URL YouTube et choisis le format (audio MP3/FLAC/WAV/AAC/OGG ou video MP4/MKV/WEBM). File d'attente integree.</li>
+                        <li><strong>Recherche</strong> : recherche YouTube directement. 4 actions par resultat (DL, file, ajout Flow, ecouter en streaming).</li>
+                        <li><strong>Bibliotheque</strong> : tes fichiers locaux + sous-section Historique avec re-telechargement par lot.</li>
+                        <li><strong>Mon Flow</strong> : ton "Spotify perso". Streaming sans telechargement, playlists, top ecoutes, vues rapides (Aujourd'hui/Semaine/Mois...).</li>
+                        <li><strong>Stats</strong> : statistiques d'ecoute, ecoutes ephemeres, comparatif des strategies de stockage.</li>
+                        <li><strong>Profil</strong> : preferences par defaut, spectre visuel, options crossfade, notifications, paroles.</li>
+                        <li><strong>Aide</strong> : tu y es 👋</li>
+                    </ul>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-dl">
+                <summary><span class="help-emoji">⬇</span> Telecharger un morceau (tutoriel)</summary>
+                <div class="help-body">
+                    <ol class="help-steps">
+                        <li>Onglet <strong>Telecharger</strong></li>
+                        <li>Colle l'URL YouTube dans le champ</li>
+                        <li>Clique sur la barre <em>"MP3 - Meilleure qualite"</em> pour deplier les options : choisis Audio/Video, format, qualite, dossier de destination, telechargement de la couverture</li>
+                        <li>Clique <strong>Telecharger</strong></li>
+                        <li>La barre de progression s'anime. Tu peux <strong>annuler</strong> a tout moment</li>
+                        <li>Quand c'est fini, lien direct vers le fichier (et la couverture si demandee)</li>
+                    </ol>
+                    <p class="help-tip"><strong>Astuce</strong> : le bouton <em>"+ Ajouter a la file d'attente"</em> permet d'enchainer plusieurs URLs. Erreur ou message bloque ? Bouton <strong>×</strong> sur chaque message ou <em>"Effacer le panneau"</em>.</p>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-search">
+                <summary><span class="help-emoji">🔍</span> Recherche YouTube + ecoutes ephemeres</summary>
+                <div class="help-body">
+                    <h4>Faire une recherche</h4>
+                    <ol class="help-steps">
+                        <li>Onglet <strong>Recherche</strong>, tape un mot-cle, Enter ou bouton "Rechercher"</li>
+                        <li>Pour chaque resultat : <strong>DL</strong> telecharge directement / <strong>+ File</strong> ajoute a la file / <strong>+ Flow</strong> ajoute a Mon Flow / <strong>🎧 Ecouter</strong> streame sans telecharger / <strong>▶ Video</strong> ouvre la video</li>
+                        <li>Filtres en haut des resultats : Tous / Nouveaux / Telecharges / Mon Flow + filtre par duree</li>
+                        <li>"Charger plus de resultats" en bas pour passer a 40, 60... (max 50 par requete)</li>
+                    </ol>
+                    <h4>Recherches recentes</h4>
+                    <p>Quand le champ est vide, tu vois tes <strong>recherches recentes</strong> (10/20/50/100 affichables, configurable dans Profil). Clique pour relancer, croix pour supprimer.</p>
+                    <h4>Ecoutes ephemeres</h4>
+                    <p>Les titres ecoutes via <strong>🎧 Ecouter</strong> mais jamais ajoutes a Flow/Lib apparaissent dans le bloc <strong>"Ecoutes ephemeres"</strong> sous les recherches recentes. Boutons : ▶ re-ecouter, + Flow, DL, × oublier.</p>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-lib">
+                <summary><span class="help-emoji">📚</span> Bibliotheque + Historique</summary>
+                <div class="help-body">
+                    <h4>Bibliotheque</h4>
+                    <ul class="help-list">
+                        <li>Statistiques en haut : total, audio, video, espace disque, duree totale</li>
+                        <li><strong>+ Nouveau dossier</strong> pour organiser ; deplacement par menu sur chaque fichier</li>
+                        <li>Tri (date / titre / type / taille), filtres par type/format, recherche textuelle</li>
+                        <li>Selection multiple : <strong>Tout selectionner</strong> -> <strong>Lire la selection</strong> ou <strong>Supprimer la selection</strong></li>
+                    </ul>
+                    <h4>Historique (bouton "Historique" en haut)</h4>
+                    <ul class="help-list">
+                        <li>Filtres : Tous / Presents (encore dans la lib) / Absents</li>
+                        <li>Re-telechargement par lot avec choix du format</li>
+                        <li><strong>Export JSON</strong> pour sauvegarder ton historique, <strong>Import JSON</strong> pour le recharger sur un autre PC (dedoublonnage automatique par URL)</li>
+                        <li>Drag & drop d'un element vers Mon Flow</li>
+                    </ul>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-flow">
+                <summary><span class="help-emoji">🎵</span> Mon Flow - ton Spotify perso</summary>
+                <div class="help-body">
+                    <h4>Ajouter des morceaux</h4>
+                    <ul class="help-list">
+                        <li><strong>+ Depuis l'historique</strong> : importe tous tes telechargements passes</li>
+                        <li><strong>Rechercher sur YouTube</strong> : recherche integree, ajout direct</li>
+                        <li><strong>+ Ajouter par URL</strong> : coller une URL YouTube</li>
+                        <li>Drag & drop depuis l'historique vers Mon Flow ou une playlist</li>
+                        <li>Extension Chrome : bouton +F sur YouTube</li>
+                        <li><strong>Importer</strong> : charger un JSON</li>
+                    </ul>
+                    <h4>Couverture Top N en haut</h4>
+                    <p>Les <strong>3, 5, 10 ou 20 morceaux les plus ecoutes</strong> (selecteur dans le coin) sont mis en valeur en grandes cartes avec rangs or/argent/bronze. Ils restent aussi dans la liste en dessous.</p>
+                    <h4>Vues rapides (chips)</h4>
+                    <ul class="help-list">
+                        <li><strong>⭐ Plus ecoutes</strong> · <strong>🕐 Recemment ajoutes</strong> · <strong>❤ Aimes</strong></li>
+                        <li><strong>☀ Aujourd'hui</strong> · <strong>📅 Cette semaine</strong> · <strong>🗓 Ce mois</strong> (basees sur lastPlayed)</li>
+                        <li><strong>📷 Decouvertes</strong> : ajoutes &lt;30j et deja ecoutes 3x+</li>
+                        <li><strong>🔗 A redecouvrir</strong> : ecoutes 5x+ mais pas joues depuis &gt;90j</li>
+                        <li><strong>🕑 Coups d'un soir</strong> : joues 1 seule fois il y a &gt;90j</li>
+                        <li><strong>❓ Jamais ecoutes</strong></li>
+                    </ul>
+                    <h4>Lecture (deux boutons par titre)</h4>
+                    <ul class="help-list">
+                        <li><strong>▶ Ecouter</strong> : lecture sequentielle (desactive l'aleatoire)</li>
+                        <li><strong>🔀 Aleatoire</strong> : lit ce titre + active le shuffle pour la suite</li>
+                        <li><strong>▶ Video</strong> : ouvre l'iframe YouTube</li>
+                        <li><strong>♥</strong> : aimer/desaimer</li>
+                        <li><strong>×</strong> : retirer du Flow (envoye dans la corbeille 24h)</li>
+                    </ul>
+                    <h4>Crossfade (configurable dans Profil)</h4>
+                    <p>Slider 0-8s. A activer dans <strong>Profil → Lecture - Crossfade</strong>. Fondu enchaine entre titres consecutifs (audio uniquement). 0 = desactive.</p>
+                    <h4>Player bar global</h4>
+                    <p>3 modes mutuellement exclusifs : <strong>🔀 Aleatoire</strong>, <strong>🔁 Repeter selection</strong>, <strong>🔂 Repeter ce titre</strong>. Quand un mode est actif il est visible (fond rouge plein + petit point lumineux).</p>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-lyrics">
+                <summary><span class="help-emoji">📜</span> Paroles - 3 sources, recherche manuelle, versions</summary>
+                <div class="help-body">
+                    <h4>Comment ouvrir</h4>
+                    <p>Lance un titre, le player bar apparait en bas. Clique <strong>📜</strong> a droite (entre Sleep timer et File de lecture). Le panneau s'ouvre en bas a droite.</p>
+                    <h4>Sources interrogees automatiquement</h4>
+                    <ol class="help-steps">
+                        <li><strong>lrclib.net</strong> (paroles synchronisees LRC, le mieux)</li>
+                        <li><strong>api.lyrics.ovh</strong> (paroles plain en fallback)</li>
+                        <li><strong>genius.com</strong> (scraping en dernier recours, le plus complet)</li>
+                    </ol>
+                    <p class="help-tip">Spinner anime pendant la recherche. A 1.5s : "Premiere source vide, exploration des autres sources..." s'affiche.</p>
+                    <h4>Si les paroles sont fausses ou le matching rate</h4>
+                    <p>Bouton <strong>✏️</strong> dans la barre d'outils du panneau ouvre un mini-formulaire <em>Artiste / Titre</em> pre-rempli. Corrige et clique <strong>Chercher</strong>. Chaque recherche reussie devient un onglet en haut du panneau (jusqu'a 5) - clique pour comparer / switcher.</p>
+                    <h4>Si rien n'est trouve</h4>
+                    <p>7 liens cliquables vers Genius, AZLyrics, Musixmatch, Paroles.net, Lyrics.com, Google « lyrics », YouTube « lyrics » apparaissent automatiquement.</p>
+                    <h4>Reglages dans la barre d'outils du panneau</h4>
+                    <ul class="help-list">
+                        <li><strong>☑ Suivi auto</strong> : on/off du scroll automatique</li>
+                        <li><strong>Mode click</strong> sur une ligne : <em>Seeker</em> (la chanson saute a ce moment), <em>Synchro</em> (cette ligne devient "maintenant", offset auto-calcule), <em>Rien</em></li>
+                        <li><strong>Badge offset</strong> : si decalage applique, clic dessus = reset</li>
+                        <li><strong>🎯</strong> Recentrer sur la ligne courante</li>
+                    </ul>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-karaoke">
+                <summary><span class="help-emoji">🎤</span> Mode karaoke plein ecran</summary>
+                <div class="help-body">
+                    <p>Bouton <strong>🎤</strong> dans la barre d'outils du panneau Paroles. Defilement fluide type prompteur (transition 0.55s, mask gradient en haut/bas).</p>
+                    <h4>Reglages personnalisables</h4>
+                    <p>Icone <strong>⚙️</strong> en haut a gauche pendant le karaoke ouvre le panneau de reglages :</p>
+                    <ul class="help-list">
+                        <li><strong>Effet ligne courante</strong> : Glow / Pulse / Bounce / Zoom max / Slide / Statique</li>
+                        <li><strong>Couleur</strong> : Rose-orange / Bleu / Vert / Violet / Or / Blanc</li>
+                        <li><strong>Lignes voisines</strong> : 1 / 2 / 3 avant et apres</li>
+                        <li><strong>Taille</strong> : Petit / Moyen / Grand / Tres grand</li>
+                        <li><strong>Police</strong> : Sans-serif / Serif / Monospace / Display (Impact)</li>
+                        <li><strong>Background</strong> : Sombre uni / Degrade sombre / Aurora animee / Noir pur</li>
+                        <li><strong>Majuscules</strong> on/off</li>
+                    </ul>
+                    <p class="help-tip">Tout est sauvegarde dans localStorage et applique en temps reel. <strong>Echap</strong> ou clic sur la croix pour quitter.</p>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-stats">
+                <summary><span class="help-emoji">📊</span> Statistiques d'ecoute</summary>
+                <div class="help-body">
+                    <p>Onglet <strong>Stats</strong>, 4 sous-onglets :</p>
+                    <ul class="help-list">
+                        <li><strong>Mes stats</strong> : total ecoutes, top heure, top artiste #1, plage active. Vues : Global / Annee / Mois / Jour avec drill-down. 5 designs : Classique / Vibrant / Ligne / Heatmap / Minimal</li>
+                        <li><strong>Ephemeres</strong> : titres ecoutes en streaming jamais sauves. Bouton <strong>▶</strong> orange pour re-ecouter directement, + Flow, DL, × Oublier</li>
+                        <li><strong>Stockage</strong> : choix de la strategie (mensuel / annuel / fichier unique)</li>
+                        <li><strong>Comparatif</strong> : evaluation ponderee des strategies selon des criteres cochables</li>
+                    </ul>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-profile">
+                <summary><span class="help-emoji">👤</span> Profil & Preferences</summary>
+                <div class="help-body">
+                    <ul class="help-list">
+                        <li><strong>Preferences par defaut</strong> : type prefere (audio/video), formats, qualites, couverture auto</li>
+                        <li><strong>Spectre visuel musical</strong> : effet d'arriere-plan anime pendant la lecture (opacite, flou, themes couleur, styles barres, sensibilite, etc.)</li>
+                        <li><strong>Onglet Recherche</strong> : nombre de recherches recentes affichees (10/20/50/100)</li>
+                        <li><strong>Lecture - Crossfade</strong> : duree du fondu enchaine (0-8s)</li>
+                        <li><strong>Mon Flow - Notifications & Paroles</strong> :
+                            <ul>
+                                <li>Notifier quand un titre demarre (necessite permission navigateur)</li>
+                                <li>Ouvrir automatiquement le panneau Paroles a chaque nouveau titre</li>
+                            </ul>
+                        </li>
+                        <li><strong>Cache</strong> : stats et bouton vider</li>
+                    </ul>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-shortcuts">
+                <summary><span class="help-emoji">⌨</span> Raccourcis clavier</summary>
+                <div class="help-body">
+                    <table class="help-table">
+                        <tr><td><kbd>Espace</kbd> ou <kbd>K</kbd></td><td>Lecture / pause</td></tr>
+                        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>-10s / +10s</td></tr>
+                        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Volume +5 / -5</td></tr>
+                        <tr><td><kbd>M</kbd></td><td>Mute</td></tr>
+                        <tr><td><kbd>N</kbd></td><td>Suivant</td></tr>
+                        <tr><td><kbd>P</kbd></td><td>Precedent</td></tr>
+                        <tr><td><kbd>F</kbd></td><td>Aimer</td></tr>
+                        <tr><td><kbd>S</kbd></td><td>Aleatoire</td></tr>
+                        <tr><td><kbd>L</kbd></td><td>Boucle</td></tr>
+                        <tr><td><kbd>Echap</kbd></td><td>Quitter le karaoke</td></tr>
+                        <tr><td><kbd>?</kbd></td><td>Afficher l'aide raccourcis</td></tr>
+                    </table>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-trouble">
+                <summary><span class="help-emoji">🛠</span> Depannage</summary>
+                <div class="help-body">
+                    <table class="help-table">
+                        <tr><th>Probleme</th><th>Solution</th></tr>
+                        <tr><td>Erreur 429 YouTube</td><td>Trop de requetes. Attendre 15-30 min.</td></tr>
+                        <tr><td>Sign in to confirm</td><td>Auto-resolu via <code>--remote-components ejs:github</code></td></tr>
+                        <tr><td>Audio propose de telecharger au lieu de lire</td><td>Le proxy a deja le bon Content-Type, recharge la page</td></tr>
+                        <tr><td>Musique coupe au refresh</td><td>L'etat est sauve, ca reprend automatiquement</td></tr>
+                        <tr><td>Paroles introuvables</td><td>Bouton ✏️ pour saisie manuelle, ou utiliser un des 7 liens externes proposes</td></tr>
+                        <tr><td>Karaoke saute d'un coup</td><td>Defilement fluide active par defaut (transform translateY)</td></tr>
+                        <tr><td>Boutons en double</td><td>Vider le cache navigateur (<kbd>Ctrl+Shift+R</kbd>)</td></tr>
+                        <tr><td>L'app ne charge pas</td><td>Verifier que <code>node server.js</code> tourne sur le port 3000</td></tr>
+                    </table>
+                    <p class="help-tip">Logs techniques disponibles : bouton <strong>engrenage</strong> en bas a droite -> <strong>Copier les logs</strong> pour diagnostic.</p>
+                </div>
+            </details>
+
+            <details class="help-card" id="help-tips">
+                <summary><span class="help-emoji">💡</span> Astuces avancees</summary>
+                <div class="help-body">
+                    <ul class="help-list">
+                        <li><strong>Workflow rapide</strong> : utilise l'extension Chrome v2 pour ajouter a Mon Flow en 1 clic depuis YouTube</li>
+                        <li><strong>Decouvertes mensuelles</strong> : la chip <em>📷 Decouvertes</em> dans Mon Flow surface tes vrais coups de coeur recents (ajoutes &lt;30j et ecoutes 3x+)</li>
+                        <li><strong>Comparer plusieurs versions de paroles</strong> : utilise ✏️ plusieurs fois, chaque recherche cree un onglet, switche entre eux</li>
+                        <li><strong>Recaler les paroles</strong> : si decalage, mets le mode click sur "Synchro" puis clique la ligne qui correspond a maintenant</li>
+                        <li><strong>Karaoke pour soiree</strong> : effet Bounce + couleur Or + police Display + background Aurora animee</li>
+                        <li><strong>Karaoke pour concentration</strong> : effet Statique + couleur Blanc + police Serif + background Noir pur</li>
+                        <li><strong>Transferer sur un autre PC</strong> : copie le dossier sans <code>node_modules/</code>, <code>downloads/</code>, <code>data/</code>, lance <code>start.bat</code>, puis Importer ton historique et Mon Flow</li>
+                        <li><strong>Sleep timer fade-out</strong> : 5/15/30/45/60/90 min ou custom, fade-out 5s a la fin</li>
+                    </ul>
+                </div>
+            </details>
+        </div>
+    </div>
+
 </div>
 
 <!-- Player bar fixe -->
@@ -654,30 +1062,87 @@
     </div>
     <div class="player-main">
         <img class="player-thumb" id="playerThumb" src="" alt="">
+        <canvas id="playerVisualizer" class="player-visualizer" width="120" height="42" title="Spectre audio (clique pour cacher)"></canvas>
         <div class="player-info">
             <div class="p-title" id="playerTitle">-</div>
             <div class="p-artist" id="playerArtist">-</div>
+            <div class="p-source" id="playerSource" style="display:none;"><span class="p-source-marquee" id="playerSourceText"></span></div>
             <div class="p-next" id="playerNext" style="display:none;"><img class="p-next-thumb" id="playerNextThumb" src=""> Suivante : <span id="playerNextTitle"></span></div>
         </div>
         <div class="player-time" id="playerTime">0:00 / 0:00</div>
+        <button onclick="playerToggleLike()" id="btnPlayerLike" class="player-like-btn" title="Aimer ce titre" style="display:none;">&#9825;</button>
         <div class="player-controls">
-            <button onclick="playerSetMode('shuffle')" id="btnShuffle" title="Aleatoire">&#9776;</button>
+            <button onclick="playerSetMode('shuffle')" id="btnShuffle" title="Aleatoire (active/desactive)">&#128256;</button>
             <button onclick="playerPrev()" title="Precedent">&#9198;</button>
             <button class="btn-play" onclick="playerToggle()" id="btnPlayPause" title="Lecture">&#9654;</button>
             <button onclick="playerNext()" title="Suivant">&#9197;</button>
-            <button onclick="playerSetMode('loop')" id="btnLoop" title="Boucle">&#8634;</button>
-            <button onclick="playerSetMode('loopOne')" id="btnLoopOne" title="Boucle 1">&#8635;</button>
+            <button onclick="playerSetMode('loop')" id="btnLoop" title="Repeter toute la selection">&#128257;</button>
+            <button onclick="playerSetMode('loopOne')" id="btnLoopOne" title="Repeter ce titre">&#128258;</button>
         </div>
         <div class="player-volume">
             <button onclick="playerMute()">&#128266;</button>
             <input type="range" min="0" max="100" value="80" oninput="playerSetVolume(this.value)" id="volumeSlider">
         </div>
+        <button class="player-sleep-btn" onclick="showSleepTimer()" id="btnSleepTimer" title="Sleep timer">&#9203;<span id="sleepTimerBadge" style="display:none;"></span></button>
+        <button class="player-queue-btn" id="btnPlayerLyrics" onclick="toggleLyricsPanel()" title="Paroles (lrclib.net)">&#128220;</button>
+        <button class="player-queue-btn" id="btnPlayerDesc" onclick="toggleDescriptionPanel()" title="Description / Tracklist / Chapitres">&#128203;</button>
         <button class="player-queue-btn" onclick="togglePlayerQueue()" title="File de lecture">&#9776;</button>
         <button class="player-close" onclick="playerClose()" title="Fermer">&#10005;</button>
     </div>
     <div class="player-queue" id="playerQueue" style="display:none;">
         <div class="pq-header"><span>File de lecture</span><span class="pq-count" id="pqCount"></span></div>
         <div class="pq-list" id="pqList"></div>
+    </div>
+    <div class="desc-panel" id="descPanel" style="display:none;">
+        <div class="dp-header">
+            <span class="dp-title" id="dpTitle">Description</span>
+            <button class="dp-close" onclick="toggleDescriptionPanel()" title="Fermer">&times;</button>
+        </div>
+        <div class="dp-tabs">
+            <button class="dp-tab active" data-tab="chapters" onclick="dpSetTab('chapters')">📑 Chapitres</button>
+            <button class="dp-tab" data-tab="tracklist" onclick="dpSetTab('tracklist')">🎵 Tracklist</button>
+            <button class="dp-tab" data-tab="transcript" onclick="dpSetTab('transcript')">🗨 Transcription</button>
+            <button class="dp-tab" data-tab="text" onclick="dpSetTab('text')">📝 Texte</button>
+            <button class="dp-tab" data-tab="info" onclick="dpSetTab('info')">ℹ Infos</button>
+        </div>
+        <div class="dp-body" id="dpBody">
+            <div class="dp-empty">Aucun titre en cours</div>
+        </div>
+    </div>
+    <div class="lyrics-panel" id="lyricsPanel" style="display:none;">
+        <div class="lp-header">
+            <span class="lp-title" id="lpTitle">Paroles</span>
+            <span class="lp-source" id="lpSource"></span>
+            <button class="lp-close" onclick="toggleLyricsPanel()" title="Fermer">&times;</button>
+        </div>
+        <div class="lp-toolbar">
+            <label class="lp-follow-label" title="Suivre automatiquement la ligne en cours">
+                <input type="checkbox" id="lpFollowToggle" onchange="setLyricsAutoFollow(this.checked)"> Suivi auto
+            </label>
+            <select id="lpClickMode" class="lp-click-mode" onchange="setLyricsClickMode(this.value)" title="Que faire quand on clique sur une ligne">
+                <option value="seek">Click = seeker</option>
+                <option value="sync">Click = synchro</option>
+                <option value="none">Click = rien</option>
+            </select>
+            <span id="lpOffsetBadge" class="lp-offset-badge" style="display:none;" onclick="resetLyricsOffset()" title="Decalage applique - clic pour reset"></span>
+            <button class="lp-scroll-btn" id="lpFixBtn" onclick="toggleManualLyricsSearch()" title="Mauvaises paroles ? Corriger la recherche">&#9998;</button>
+            <button class="lp-scroll-btn" id="lpKaraokeBtn" onclick="enterKaraokeMode()" title="Mode karaoke (plein ecran)">&#127908;</button>
+            <button class="lp-scroll-btn" id="lpScrollNow" onclick="lyricsScrollToCurrent()" title="Aller a la ligne en cours">&#127919;</button>
+        </div>
+        <div class="lp-versions" id="lpVersions" style="display:none;"></div>
+        <div class="lp-manual-overlay" id="lpManualOverlay" style="display:none;">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Mauvaises paroles ? Corrige l'artiste et le titre :</div>
+            <input type="text" id="lpFixArtist" placeholder="Artiste">
+            <input type="text" id="lpFixTitle" placeholder="Titre">
+            <div style="display:flex;gap:6px;margin-top:6px;">
+                <button onclick="manualLyricsSearchFromFix(false)" class="lp-fix-btn lp-fix-yes">Chercher (lrclib)</button>
+                <button onclick="manualLyricsSearchFromFix(true)" class="lp-fix-btn lp-fix-extra">+ autres sources</button>
+                <button onclick="toggleManualLyricsSearch()" class="lp-fix-btn lp-fix-cancel">Annuler</button>
+            </div>
+        </div>
+        <div class="lp-body" id="lpBody">
+            <div class="lp-empty">Aucun titre en cours</div>
+        </div>
     </div>
 </div>
 
@@ -708,6 +1173,7 @@
 </div>
 
 <audio id="audioEl"></audio>
+<audio id="audioElB"></audio>
 
 <div class="video-player-overlay" id="videoOverlay">
     <button class="vp-close" onclick="closeVideoPlayer()">&#10005;</button>
@@ -734,6 +1200,94 @@
         <div class="modal-btns">
             <button class="btn-cancel" onclick="closeModal('modalConfirm')">Annuler</button>
             <button id="confirmBtn" style="background:var(--error);">Supprimer</button>
+        </div>
+    </div>
+</div>
+
+<div class="karaoke-overlay" id="karaokeOverlay" style="display:none;">
+    <button class="ko-settings-btn" onclick="toggleKaraokeSettings()" title="Reglages karaoke">&#9881;</button>
+    <button class="ko-close" onclick="exitKaraokeMode()" title="Quitter (Echap)">&times;</button>
+    <div class="ko-meta">
+        <div class="ko-title" id="koTitle"></div>
+        <div class="ko-artist" id="koArtist"></div>
+    </div>
+    <div class="ko-viewport" id="koViewport">
+        <div class="ko-stage" id="koStage">
+            <div class="ko-empty">Pas de paroles synchronisees pour ce titre.</div>
+        </div>
+    </div>
+
+    <div class="ko-settings-panel" id="koSettingsPanel" style="display:none;">
+        <div class="ko-set-header">
+            <span>Reglages karaoke</span>
+            <button onclick="toggleKaraokeSettings()" class="ko-set-close">&times;</button>
+        </div>
+        <div class="ko-set-body">
+            <div class="ko-set-row">
+                <label>Effet ligne courante</label>
+                <select id="koSetEffect" onchange="updateKaraokeSetting('effect', this.value)">
+                    <option value="glow">Glow + scale (defaut)</option>
+                    <option value="pulse">Pulse</option>
+                    <option value="bounce">Bounce</option>
+                    <option value="zoom">Zoom max</option>
+                    <option value="slide">Slide horizontal</option>
+                    <option value="static">Statique (rien)</option>
+                </select>
+            </div>
+            <div class="ko-set-row">
+                <label>Couleur</label>
+                <select id="koSetColor" onchange="updateKaraokeSetting('color', this.value)">
+                    <option value="pink">Rose-orange (defaut)</option>
+                    <option value="blue">Bleu-cyan</option>
+                    <option value="green">Vert-emeraude</option>
+                    <option value="purple">Violet-magenta</option>
+                    <option value="gold">Or-jaune</option>
+                    <option value="white">Blanc pur</option>
+                </select>
+            </div>
+            <div class="ko-set-row">
+                <label>Lignes voisines</label>
+                <select id="koSetContext" onchange="updateKaraokeSetting('context', parseInt(this.value))">
+                    <option value="1">1 avant / 1 apres</option>
+                    <option value="2">2 avant / 2 apres (defaut)</option>
+                    <option value="3">3 avant / 3 apres</option>
+                </select>
+            </div>
+            <div class="ko-set-row">
+                <label>Taille de police</label>
+                <select id="koSetSize" onchange="updateKaraokeSetting('size', this.value)">
+                    <option value="sm">Petit</option>
+                    <option value="md">Moyen (defaut)</option>
+                    <option value="lg">Grand</option>
+                    <option value="xl">Tres grand</option>
+                </select>
+            </div>
+            <div class="ko-set-row">
+                <label>Police</label>
+                <select id="koSetFont" onchange="updateKaraokeSetting('font', this.value)">
+                    <option value="sans">Sans-serif (defaut)</option>
+                    <option value="serif">Serif (classique)</option>
+                    <option value="mono">Monospace</option>
+                    <option value="display">Display (gras)</option>
+                </select>
+            </div>
+            <div class="ko-set-row">
+                <label>Background</label>
+                <select id="koSetBg" onchange="updateKaraokeSetting('bg', this.value)">
+                    <option value="dark">Sombre uni (defaut)</option>
+                    <option value="gradient">Degrade sombre</option>
+                    <option value="aurora">Aurora animee</option>
+                    <option value="black">Noir pur</option>
+                </select>
+            </div>
+            <div class="ko-set-row">
+                <label class="ko-set-check">
+                    <input type="checkbox" id="koSetUppercase" onchange="updateKaraokeSetting('uppercase', this.checked)"> Majuscules
+                </label>
+            </div>
+            <div class="ko-set-row">
+                <button onclick="resetKaraokeSettings()" class="ko-set-reset">Tout reinitialiser</button>
+            </div>
         </div>
     </div>
 </div>
@@ -770,6 +1324,7 @@
 
 <button onclick="showLogsPanel()" style="position:fixed;bottom:10px;right:10px;background:#16213e;color:#e94560;border:1px solid #e94560;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:9998;" title="Logs techniques">&#9881;</button>
 
+<script src="js/helpers.js"></script>
 <script src="js/app.js"></script>
 
 </body>

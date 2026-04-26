@@ -39,60 +39,27 @@ function fillRoundRect(x1, y1, x2, y2, rad, r, g, b, a) {
     fillCircle(x2 - rad, y2 - rad, rad, r, g, b, a);
 }
 
+// Triangle isocele pointant a droite (logo play YouTube)
+function fillPlayTriangle(cx, cy, halfHeight, length, r, g, b, a) {
+    const xLeft = cx - length / 2;
+    for (let y = cy - halfHeight; y <= cy + halfHeight; y++) {
+        const dy = Math.abs(y - cy);
+        const ratio = 1 - dy / halfHeight;
+        const xMax = xLeft + length * ratio;
+        for (let x = xLeft; x <= xMax; x++) {
+            setPixel(Math.round(x), Math.round(y), r, g, b, a);
+        }
+    }
+}
+
 // Fond transparent
 pixels.fill(0);
 
-// Rectangle rouge YouTube arrondi
-fillRoundRect(2, 8, 45, 39, 6, 204, 0, 0, 255);
+// Logo YouTube en violet : rectangle arrondi (#9C27B0)
+fillRoundRect(2, 8, 45, 39, 6, 156, 39, 176, 255);
 
-// --- Tete de mort (crane) ---
-// Crane blanc
-fillCircle(24, 19, 8, 240, 240, 240, 255);
-fillRoundRect(17, 18, 31, 28, 3, 240, 240, 240, 255);
-
-// Yeux noirs
-fillCircle(20, 18, 3, 0, 0, 0, 255);
-fillCircle(28, 18, 3, 0, 0, 0, 255);
-
-// Pupilles rouges
-fillCircle(20, 18, 1, 255, 0, 0, 255);
-fillCircle(28, 18, 1, 255, 0, 0, 255);
-
-// Nez (triangle noir)
-setPixel(23, 22, 0, 0, 0);
-setPixel(24, 22, 0, 0, 0);
-setPixel(25, 22, 0, 0, 0);
-setPixel(24, 21, 0, 0, 0);
-
-// Machoire / dents
-fillRect(19, 27, 29, 28, 240, 240, 240, 255);
-fillRect(19, 29, 29, 33, 240, 240, 240, 255);
-
-// Lignes entre les dents (noir)
-for (let y = 27; y <= 33; y++) {
-    setPixel(21, y, 0, 0, 0);
-    setPixel(24, y, 0, 0, 0);
-    setPixel(27, y, 0, 0, 0);
-}
-
-// Os croises sous le crane
-// Os 1 : haut-gauche vers bas-droite
-for (let i = -8; i <= 8; i++) {
-    const x = 24 + i;
-    const y = 33 + Math.round(i * 0.5);
-    fillCircle(x, y, 1, 240, 240, 240, 255);
-}
-// Os 2 : haut-droite vers bas-gauche
-for (let i = -8; i <= 8; i++) {
-    const x = 24 + i;
-    const y = 37 - Math.round(i * 0.5);
-    fillCircle(x, y, 1, 240, 240, 240, 255);
-}
-// Embouts des os (ronds)
-fillCircle(15, 29, 2, 240, 240, 240, 255);
-fillCircle(33, 37, 2, 240, 240, 240, 255);
-fillCircle(33, 29, 2, 240, 240, 240, 255);
-fillCircle(15, 37, 2, 240, 240, 240, 255);
+// Triangle play blanc centre
+fillPlayTriangle(24, 23, 9, 16, 255, 255, 255, 255);
 
 // === Ecrire le fichier ICO ===
 // ICO = ICONDIR header + ICONDIRENTRY + BMP data (sans file header)

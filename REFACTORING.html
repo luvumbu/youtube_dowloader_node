@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Refactoring - Avant / Apres</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #e0e0e0; padding: 24px; line-height: 1.5; }
+h1 { font-size: 28px; margin-bottom: 6px; color: #fff; }
+.subtitle { color: #888; margin-bottom: 30px; font-size: 14px; }
+section { margin-bottom: 36px; }
+h2 { font-size: 20px; color: #fff; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #333; display: flex; align-items: center; gap: 10px; }
+.badge { background: #2196F3; color: #fff; font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: 600; }
+.badge.before { background: #f44336; }
+.badge.after { background: #4CAF50; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: #252525; border: 1px solid #333; border-radius: 10px; padding: 16px; text-align: center; }
+.stat-card .num { font-size: 28px; font-weight: 700; color: #fff; }
+.stat-card .num.improvement { color: #4CAF50; }
+.stat-card .num.problem { color: #ff9800; }
+.stat-card .label { font-size: 12px; color: #888; margin-top: 4px; }
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+@media (max-width: 800px) { .compare { grid-template-columns: 1fr; } }
+.code-block { background: #0d0d0d; border: 1px solid #333; border-radius: 10px; overflow: hidden; }
+.code-block.before { border-left: 3px solid #f44336; }
+.code-block.after { border-left: 3px solid #4CAF50; }
+.code-header { padding: 8px 14px; background: #1a1a1a; border-bottom: 1px solid #333; font-size: 12px; color: #888; display: flex; justify-content: space-between; align-items: center; }
+.code-header strong { color: #fff; }
+.code-header .occur { background: #2a2a2a; color: #888; padding: 2px 8px; border-radius: 8px; font-size: 11px; }
+.code-block.before .code-header .occur { background: rgba(244,67,54,0.15); color: #f44336; }
+.code-block.after .code-header .occur { background: rgba(76,175,80,0.15); color: #4CAF50; }
+pre { padding: 14px; font-family: "Cascadia Code", "Consolas", monospace; font-size: 12px; line-height: 1.55; overflow-x: auto; color: #d4d4d4; }
+.kw { color: #c586c0; }
+.fn { color: #dcdcaa; }
+.str { color: #ce9178; }
+.com { color: #6a9955; font-style: italic; }
+.var { color: #9cdcfe; }
+.num-color { color: #b5cea8; }
+.dup { background: rgba(244,67,54,0.15); padding: 2px 4px; border-radius: 3px; color: #ff9999; }
+.gain { background: rgba(76,175,80,0.15); padding: 2px 4px; border-radius: 3px; color: #a5d6a7; }
+
+.note { background: #252525; border-left: 3px solid #2196F3; padding: 12px 16px; border-radius: 6px; margin-top: 12px; font-size: 13px; color: #b0b0b0; }
+.note strong { color: #fff; }
+
+.summary { background: linear-gradient(135deg, rgba(76,175,80,0.1), rgba(33,150,243,0.05)); border: 1px solid #4CAF50; border-radius: 12px; padding: 20px; margin-top: 30px; }
+.summary h3 { color: #4CAF50; margin-bottom: 10px; }
+.summary ul { margin-left: 20px; line-height: 1.8; }
+.summary li strong { color: #fff; }
+
+.timeline { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+.step { flex: 1; min-width: 240px; background: #252525; border: 1px solid #333; border-radius: 10px; padding: 16px; }
+.step .step-num { background: #2196F3; color: #fff; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; margin-bottom: 8px; }
+.step h4 { color: #fff; margin-bottom: 6px; font-size: 14px; }
+.step p { font-size: 12px; color: #888; line-height: 1.6; }
+.step .duration { color: #4CAF50; font-size: 11px; font-weight: 600; margin-top: 6px; display: block; }
+</style>
+</head>
+<body>
+
+<h1>Refactoring : avant / apres</h1>
+<div class="subtitle">Comparaison concrete de l'etat actuel du code et de ce que la refacto va apporter (etape 1 : helpers seulement).</div>
+
+<section>
+    <h2>Constat actuel</h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="num">6151</div>
+            <div class="label">lignes dans app.js</div>
+        </div>
+        <div class="stat-card">
+            <div class="num">251</div>
+            <div class="label">fonctions globales</div>
+        </div>
+        <div class="stat-card">
+            <div class="num problem">7x</div>
+            <div class="label">fonction <code>esc()</code> dupliquee</div>
+        </div>
+        <div class="stat-card">
+            <div class="num problem">119</div>
+            <div class="label">fetch() bruts sans wrapper</div>
+        </div>
+        <div class="stat-card">
+            <div class="num problem">5</div>
+            <div class="label">modales construites a la main</div>
+        </div>
+        <div class="stat-card">
+            <div class="num">~25</div>
+            <div class="label">variables globales d'etat</div>
+        </div>
+    </div>
+    <div class="note">
+        <strong>Constat :</strong> le code marche mais beaucoup de patterns sont dupliques. Les helpers proposes vont eliminer cette duplication sans toucher a la logique metier.
+    </div>
+</section>
+
+<section>
+    <h2>Helper 1 <span class="badge">escapeHtml(s)</span></h2>
+    <div class="compare">
+        <div class="code-block before">
+            <div class="code-header"><strong>Avant</strong> <span class="occur">defini 7 fois</span></div>
+<pre><span class="com">// Dans renderEphemeralList</span>
+<span class="kw">const</span> <span class="fn">esc</span> = (<span class="var">s</span>) =&gt; <span class="dup"><span class="var">String</span>(<span class="var">s</span>).<span class="fn">replace</span>(/[&lt;&gt;&amp;"]/g,
+    <span class="var">c</span> =&gt; ({<span class="str">'&lt;':'&amp;lt;'</span>,<span class="str">'&gt;':'&amp;gt;'</span>,<span class="str">'&amp;':'&amp;amp;'</span>,<span class="str">'"':'&amp;quot;'</span>}[<span class="var">c</span>]))</span>;
+
+<span class="com">// Dans showHourDetails</span>
+<span class="kw">const</span> <span class="fn">esc</span> = (<span class="var">s</span>) =&gt; <span class="dup"><span class="var">String</span>(<span class="var">s</span>).<span class="fn">replace</span>(...)</span>;
+
+<span class="com">// Dans renderArtistChart</span>
+<span class="kw">const</span> <span class="fn">esc</span> = ... <span class="dup">EXACTEMENT le meme code</span>
+
+<span class="com">// + 4 autres copies dans le fichier</span></pre>
+        </div>
+        <div class="code-block after">
+            <div class="code-header"><strong>Apres</strong> <span class="occur">1 helper global</span></div>
+<pre><span class="com">// helpers.js, defini une seule fois</span>
+<span class="kw">const</span> <span class="fn">escapeHtml</span> = (<span class="var">s</span>) =&gt;
+    <span class="var">String</span>(<span class="var">s</span> ?? <span class="str">''</span>).<span class="fn">replace</span>(/[&lt;&gt;&amp;"]/g,
+        <span class="var">c</span> =&gt; ({<span class="str">'&lt;'</span>:<span class="str">'&amp;lt;'</span>,<span class="str">'&gt;'</span>:<span class="str">'&amp;gt;'</span>,
+              <span class="str">'&amp;'</span>:<span class="str">'&amp;amp;'</span>,<span class="str">'"'</span>:<span class="str">'&amp;quot;'</span>}[<span class="var">c</span>]));
+
+<span class="com">// Tous les call sites:</span>
+<span class="gain"><span class="fn">escapeHtml</span>(<span class="var">title</span>)</span>
+<span class="gain"><span class="fn">escapeHtml</span>(<span class="var">artist</span>)</span>
+<span class="com">// 7 endroits, 1 seule definition</span></pre>
+        </div>
+    </div>
+    <div class="note">Gain : <strong>~30 lignes economisees</strong> + bug-proof (la prochaine modif corrige 7 endroits d'un coup). Bonus : <code>?? ''</code> evite l'erreur sur null/undefined.</div>
+</section>
+
+<section>
+    <h2>Helper 2 <span class="badge">apiCall(url, opts)</span></h2>
+    <div class="compare">
+        <div class="code-block before">
+            <div class="code-header"><strong>Avant</strong> <span class="occur">119 fetch bruts</span></div>
+<pre><span class="kw">try</span> {
+    <span class="kw">const</span> <span class="var">resp</span> = <span class="kw">await</span> <span class="fn">fetch</span>(<span class="str">'api/flow?action=list'</span>);
+    <span class="kw">const</span> <span class="var">data</span> = <span class="kw">await</span> <span class="var">resp</span>.<span class="fn">json</span>();
+    <span class="kw">if</span> (!<span class="var">data</span>.<span class="var">success</span>) <span class="kw">return</span>;
+    <span class="dup"><span class="com">// pas de check Content-Type</span></span>
+    <span class="dup"><span class="com">// pas de detection 404 = HTML</span></span>
+    <span class="var">flowTracks</span> = <span class="var">data</span>.<span class="var">tracks</span> || [];
+} <span class="kw">catch</span> (<span class="var">e</span>) {
+    <span class="dup"><span class="com">// gestion d'erreur differente partout</span></span>
+    <span class="fn">console</span>.<span class="fn">error</span>(<span class="str">'flow error'</span>, <span class="var">e</span>);
+}
+<span class="com">// Pattern repete 119 fois</span></pre>
+        </div>
+        <div class="code-block after">
+            <div class="code-header"><strong>Apres</strong> <span class="occur">1 wrapper unifie</span></div>
+<pre><span class="com">// helpers.js</span>
+<span class="kw">async function</span> <span class="fn">apiCall</span>(<span class="var">url</span>, <span class="var">opts</span> = {}) {
+    <span class="kw">const</span> <span class="var">resp</span> = <span class="kw">await</span> <span class="fn">fetch</span>(<span class="var">url</span>, <span class="var">opts</span>);
+    <span class="kw">const</span> <span class="var">ct</span> = <span class="var">resp</span>.<span class="fn">headers</span>.<span class="fn">get</span>(<span class="str">'content-type'</span>) || <span class="str">''</span>;
+    <span class="kw">if</span> (!<span class="var">ct</span>.<span class="fn">includes</span>(<span class="str">'application/json'</span>))
+        <span class="kw">throw new</span> <span class="fn">Error</span>(<span class="str">'Serveur a redemarrer'</span>);
+    <span class="kw">return</span> <span class="var">resp</span>.<span class="fn">json</span>();
+}
+
+<span class="com">// Tous les call sites:</span>
+<span class="kw">const</span> <span class="var">data</span> = <span class="kw">await</span> <span class="gain"><span class="fn">apiCall</span>(<span class="str">'api/flow?action=list'</span>)</span>;</pre>
+        </div>
+    </div>
+    <div class="note">Gain : <strong>~150 lignes</strong> + detection auto du "serveur pas redemarre" (probleme recurrent dans nos echanges) + erreur unifiee.</div>
+</section>
+
+<section>
+    <h2>Helper 3 <span class="badge">Modal.confirm() / Modal.show()</span></h2>
+    <div class="compare">
+        <div class="code-block before">
+            <div class="code-header"><strong>Avant</strong> <span class="occur">5 modales construites a la main</span></div>
+<pre><span class="com">// confirmDialog (50 lignes inline)</span>
+<span class="kw">const</span> <span class="var">div</span> = <span class="fn">document</span>.<span class="fn">createElement</span>(<span class="str">'div'</span>);
+<span class="var">div</span>.<span class="var">id</span> = <span class="str">'confirmDialog'</span>;
+<span class="var">div</span>.<span class="fn">innerHTML</span> = <span class="str">'&lt;div class="modal"&gt;...'</span>;
+<span class="dup"><span class="com">// HTML inline dupliqué dans showAddAllToFlowModal</span></span>
+<span class="dup"><span class="com">// HTML inline dupliqué dans flowOpenColorPicker</span></span>
+<span class="dup"><span class="com">// HTML inline dupliqué dans flowOpenTrash</span></span>
+
+<span class="com">// 5 fonctions, chacune 30-80 lignes,</span>
+<span class="com">// chacune gere son own escape, son own listener,</span>
+<span class="com">// chacune duplique le markup de base</span></pre>
+        </div>
+        <div class="code-block after">
+            <div class="code-header"><strong>Apres</strong> <span class="occur">1 classe Modal</span></div>
+<pre><span class="kw">class</span> <span class="fn">Modal</span> {
+    <span class="kw">static</span> <span class="fn">confirm</span>({<span class="var">title</span>, <span class="var">message</span>, <span class="var">danger</span>}) { <span class="com">/* ... */</span> }
+    <span class="kw">static</span> <span class="fn">prompt</span>({<span class="var">title</span>, <span class="var">defaultValue</span>}) { <span class="com">/* ... */</span> }
+    <span class="kw">static</span> <span class="fn">custom</span>({<span class="var">title</span>, <span class="var">html</span>, <span class="var">buttons</span>}) { <span class="com">/* ... */</span> }
+}
+
+<span class="com">// Usage partout:</span>
+<span class="gain"><span class="fn">Modal</span>.<span class="fn">confirm</span>({
+    <span class="var">title</span>: <span class="str">'Retirer ?'</span>,
+    <span class="var">message</span>: <span class="var">title</span>,
+    <span class="var">danger</span>: <span class="kw">true</span>
+}).<span class="fn">then</span>(<span class="var">ok</span> =&gt; <span class="var">ok</span> &amp;&amp; <span class="fn">doRemove</span>())</span>;</pre>
+        </div>
+    </div>
+    <div class="note">Gain : <strong>~250 lignes</strong>. La modale playlist (existante/nouvelle) et le color picker se simplifient enormement en passant Modal.custom().</div>
+</section>
+
+<section>
+    <h2>Helper 4 <span class="badge">Format.duration() / Format.dateEU() / Format.bytes()</span></h2>
+    <div class="compare">
+        <div class="code-block before">
+            <div class="code-header"><strong>Avant</strong> <span class="occur">formats disperses</span></div>
+<pre><span class="com">// flowFormatTotalDuration (15 lignes)</span>
+<span class="kw">const</span> <span class="var">h</span> = <span class="fn">Math</span>.<span class="fn">floor</span>(<span class="var">total</span> / <span class="num-color">3600</span>);
+<span class="kw">const</span> <span class="var">m</span> = <span class="fn">Math</span>.<span class="fn">floor</span>((<span class="var">total</span> % <span class="num-color">3600</span>) / <span class="num-color">60</span>);
+<span class="kw">if</span> (<span class="var">h</span> &gt; <span class="num-color">0</span>) <span class="kw">return</span> <span class="var">h</span> + <span class="str">'h '</span> + <span class="var">m</span> + <span class="str">'min'</span>;
+
+<span class="com">// fmtRemaining (10 lignes, IDENTIQUE)</span>
+<span class="dup"><span class="kw">const</span> <span class="var">h</span> = <span class="fn">Math</span>.<span class="fn">floor</span>(<span class="var">ms</span> / <span class="num-color">3600000</span>);
+<span class="kw">const</span> <span class="var">m</span> = ...</span>
+
+<span class="com">// fmtBytes (4 lignes, dans loadStorageInfo)</span>
+<span class="dup"><span class="kw">if</span> (<span class="var">n</span> &lt; <span class="num-color">1024</span>) <span class="kw">return</span> <span class="var">n</span> + <span class="str">' o'</span>;</span>
+
+<span class="com">// fmtDate (5 fois, sous formats differents)</span>
+<span class="dup"><span class="kw">const</span> <span class="var">m</span> = <span class="var">iso</span>.<span class="fn">match</span>(/^(\d{4})-(\d{2})-(\d{2})$/);
+<span class="kw">return</span> <span class="var">m</span> ? <span class="str">`${m[3]}/${m[2]}/${m[1]}`</span> : <span class="var">iso</span>;</span></pre>
+        </div>
+        <div class="code-block after">
+            <div class="code-header"><strong>Apres</strong> <span class="occur">1 namespace Format</span></div>
+<pre><span class="kw">const</span> <span class="fn">Format</span> = {
+    <span class="fn">duration</span>(<span class="var">ms</span>) { <span class="com">/* h, min, s */</span> },
+    <span class="fn">dateEU</span>(<span class="var">iso</span>) { <span class="com">/* JJ/MM/AAAA */</span> },
+    <span class="fn">timeEU</span>(<span class="var">iso</span>) { <span class="com">/* HH:MM */</span> },
+    <span class="fn">bytes</span>(<span class="var">n</span>) { <span class="com">/* o, Ko, Mo */</span> },
+    <span class="fn">remaining</span>(<span class="var">ms</span>) { <span class="com">/* 23h 59min 59s */</span> }
+};
+
+<span class="com">// Usage:</span>
+<span class="gain"><span class="fn">Format</span>.<span class="fn">duration</span>(<span class="num-color">3500000</span>)</span>     <span class="com">// "58min 20s"</span>
+<span class="gain"><span class="fn">Format</span>.<span class="fn">dateEU</span>(<span class="str">'2026-04-25'</span>)</span>  <span class="com">// "25/04/2026"</span>
+<span class="gain"><span class="fn">Format</span>.<span class="fn">bytes</span>(<span class="num-color">1536</span>)</span>           <span class="com">// "1.5 Ko"</span></pre>
+        </div>
+    </div>
+    <div class="note">Gain : <strong>~80 lignes</strong>. Bonus : si tu veux un jour passer en format anglais ou ISO, tu changes 1 endroit.</div>
+</section>
+
+<section>
+    <h2>Helper 5 <span class="badge">Dom.toast() / Dom.escapeAttr()</span></h2>
+    <div class="compare">
+        <div class="code-block before">
+            <div class="code-header"><strong>Avant</strong></div>
+<pre><span class="com">// showToast existe deja, mais les escapeAttr</span>
+<span class="com">// pour attributs HTML sont disperses:</span>
+<span class="dup"><span class="kw">const</span> <span class="var">safePl</span> = <span class="var">pl</span>.<span class="fn">replace</span>(/'/g, <span class="str">"\\'"</span>);
+<span class="kw">const</span> <span class="var">safeTitle</span> = <span class="var">r</span>.<span class="var">title</span>.<span class="fn">replace</span>(/'/g, <span class="str">"\\'"</span>).<span class="fn">replace</span>(/"/g, <span class="str">'&amp;quot;'</span>);</span>
+<span class="dup"><span class="com">// Patterns differents pour le meme besoin</span></span></pre>
+        </div>
+        <div class="code-block after">
+            <div class="code-header"><strong>Apres</strong></div>
+<pre><span class="kw">const</span> <span class="fn">Dom</span> = {
+    <span class="fn">attr</span>(<span class="var">s</span>) { <span class="com">/* safe pour HTML attribute */</span> },
+    <span class="fn">jsStr</span>(<span class="var">s</span>) { <span class="com">/* safe pour onclick="..." */</span> },
+    <span class="fn">toast</span>(<span class="var">msg</span>, <span class="var">type</span>) { <span class="com">/* uniformise showToast */</span> }
+};
+
+<span class="gain"><span class="fn">Dom</span>.<span class="fn">attr</span>(<span class="var">title</span>)</span>
+<span class="gain"><span class="fn">Dom</span>.<span class="fn">jsStr</span>(<span class="var">playlistName</span>)</span></pre>
+        </div>
+    </div>
+    <div class="note">Gain : <strong>~40 lignes</strong> + securite (les <code>onclick="fn('${name}')"</code> avec quote dans le nom ne casseront plus jamais).</div>
+</section>
+
+<section>
+    <h2>Bilan etape 1</h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="num improvement">~550</div>
+            <div class="label">lignes en moins</div>
+        </div>
+        <div class="stat-card">
+            <div class="num improvement">−9%</div>
+            <div class="label">taille de app.js</div>
+        </div>
+        <div class="stat-card">
+            <div class="num improvement">5</div>
+            <div class="label">helpers reutilisables</div>
+        </div>
+        <div class="stat-card">
+            <div class="num improvement">0</div>
+            <div class="label">feature touchee (zero risque metier)</div>
+        </div>
+        <div class="stat-card">
+            <div class="num">~1h</div>
+            <div class="label">temps de travail</div>
+        </div>
+        <div class="stat-card">
+            <div class="num improvement">∞</div>
+            <div class="label">futures features 2x plus rapides</div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <h2>Plan d'execution</h2>
+    <div class="timeline">
+        <div class="step">
+            <div class="step-num">1</div>
+            <h4>Creer public/js/helpers.js</h4>
+            <p>Definit Format, Modal, Dom, escapeHtml, apiCall. Aucune autre modification.</p>
+            <span class="duration">~10 min</span>
+        </div>
+        <div class="step">
+            <div class="step-num">2</div>
+            <h4>Charger helpers.js avant app.js</h4>
+            <p>Ajout d'une balise script dans index.html. App.js peut utiliser les helpers immediatement.</p>
+            <span class="duration">~2 min</span>
+        </div>
+        <div class="step">
+            <div class="step-num">3</div>
+            <h4>Migration progressive de app.js</h4>
+            <p>Remplacer les patterns dupliques par les helpers, fonction par fonction. Test apres chaque batch.</p>
+            <span class="duration">~40 min</span>
+        </div>
+        <div class="step">
+            <div class="step-num">4</div>
+            <h4>Verification finale</h4>
+            <p>node --check, ouverture du navigateur, test des features sensibles (modales, API, formats).</p>
+            <span class="duration">~10 min</span>
+        </div>
+    </div>
+</section>
+
+<div class="summary">
+    <h3>Resume executif</h3>
+    <ul>
+        <li><strong>Risque :</strong> tres faible (modifications chirurgicales, pas de changement d'architecture)</li>
+        <li><strong>Gain :</strong> ~550 lignes economisees, 5 outils reutilisables, code 2x plus rapide a etendre</li>
+        <li><strong>Investment :</strong> ~1h de travail</li>
+        <li><strong>Reversibilite :</strong> totale (helpers ajoutes, anciens patterns peuvent coexister pendant la migration)</li>
+        <li><strong>Verdict :</strong> ratio gain/risque excellent. Si tu valides, je commence par creer <code>helpers.js</code>.</li>
+    </ul>
+</div>
+
+</body>
+</html>
